@@ -79,14 +79,41 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 #ab button{margin-top:12px;padding:6px 18px;background:#cc2200;border:none;color:#fff;border-radius:7px;cursor:pointer}
 @keyframes sp{from{color:#ff4400}to{color:#ffee00}}
 .sn{animation:sp .5s infinite alternate}
+
+/* ===== PHONE LAYOUT ===== */
+.cfg{display:contents}
+#btnCfg,#mtabs{display:none}
+@media (max-width:760px){
+  body{height:100dvh}
+  header{padding:6px 10px;gap:6px 8px}
+  header h1{font-size:.95rem}
+  header h1 .full,#homeLink .t{display:none}
+  .cr{width:100%;gap:6px;flex-wrap:wrap}
+  .cfg{display:none;width:100%;flex-wrap:wrap;gap:6px;align-items:center;padding:4px 0}
+  body.cfg-open .cfg{display:flex}
+  #btnCfg{display:inline-block;padding:5px 11px;border:1px solid #2a4a8a;border-radius:6px;background:#0d1a3a;color:#c0d8ff;font-size:.85rem;cursor:pointer}
+  #btnT,#btnD{flex:1}
+  #lastUp{margin-right:0}
+  #diag{padding:4px 10px}
+  #lp,#cp,#rp{display:none!important;width:100%!important;border:0!important}
+  body[data-tab=lp] #lp,body[data-tab=rp] #rp{display:flex!important;flex:1}
+  body[data-tab=cp] #cp{display:block!important;flex:1}
+  #mtabs{display:flex;flex-shrink:0;background:#0b1028;border-top:1px solid #1a2a5a;padding-bottom:env(safe-area-inset-bottom)}
+  #mtabs button{flex:1;background:none;border:0;border-top:2px solid transparent;color:#7a90bb;font-size:1.15rem;padding:7px 0 6px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer}
+  #mtabs button span{font-size:.72rem}
+  #mtabs button b{background:#1d3566;color:#cfe0ff;border-radius:9px;padding:0 6px;font-size:.68rem;font-weight:600}
+  #mtabs button.on{color:#3dff8c;border-top-color:#3dff8c}
+  #ab{width:92vw;min-width:0;top:80px;padding:12px 14px}
+}
 </style>
 </head>
-<body>
+<body data-tab="cp">
 <header>
   <div id="dot"></div>
-  <a href="index.html" title="דף הבית" style="text-decoration:none;font-size:.8rem;color:#8aacdd;border:1px solid #2a4a8a;border-radius:6px;padding:3px 9px">🏠 דף הבית</a>
-  <h1>✈ מוניטור נתב"ג – ניטור גישה בזמן אמת</h1>
+  <a id="homeLink" href="index.html" title="דף הבית" style="text-decoration:none;font-size:.8rem;color:#8aacdd;border:1px solid #2a4a8a;border-radius:6px;padding:3px 9px">🏠<span class="t"> דף הבית</span></a>
+  <h1>✈ מוניטור נתב"ג<span class="full"> – ניטור גישה בזמן אמת</span></h1>
   <div class="cr">
+    <span class="cfg">
     <label>רדיוס:</label><input type="number" id="ri" value="80" min="20" max="300">
     <label>סטייה°:</label><input type="number" id="dt" value="18" min="5" max="60">
     <label>מקור:</label>
@@ -94,8 +121,10 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
       <option value="auto">אוטומטי</option>
       <option value="opensky">OpenSky בלבד</option>
     </select>
+    </span>
     <button id="btnT">▶ הפעל</button>
     <button id="btnD">🧪 הדגמה</button>
+    <button id="btnCfg" title="הגדרות">⚙</button>
   </div>
   <span id="lastUp">לא עודכן</span>
   <span id="nextUp" style="font-size:.7rem;color:#6a8acc"></span>
@@ -123,6 +152,12 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   </div>
 </div>
 
+<nav id="mtabs">
+  <button data-tab="cp" class="on">📡<span>רדאר</span></button>
+  <button data-tab="rp">🗺<span>מפה</span></button>
+  <button data-tab="lp">✈<span>מטוסים <b id="cnt2">0</b></span></button>
+</nav>
+
 <div id="ab">
   <div style="font-size:1.8rem"><span class="sn">🚨</span></div>
   <h2>⚠ גישה חריגה</h2>
@@ -134,6 +169,7 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   <button onclick="document.getElementById('ab').style.display='none'">✕ סגור</button>
 </div>
 
+<script src="detect.js"></script>
 <script>
 // ===================== CONFIG =====================
 const TLV_LAT = 32.0055, TLV_LON = 34.8854;
@@ -333,23 +369,8 @@ function globeLoop(t){ requestAnimationFrame(globeLoop); drawScene(t); }
 let running=false, fetchTimer=null, alertCount=0;
 let planeHistory={}, alertedIcaos={};
 
-function haversine(a,b,c,d){
-  const R=6371,r=x=>x*Math.PI/180,dL=r(d-b),dA=r(c-a);
-  const x=Math.sin(dA/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dL/2)**2;
-  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
-}
-function bearingTo(a,b,c,d){
-  const r=x=>x*Math.PI/180,dL=r(d-b);
-  return(Math.atan2(Math.sin(dL)*Math.cos(r(c)),Math.cos(r(a))*Math.sin(r(c))-Math.sin(r(a))*Math.cos(r(c))*Math.cos(dL))*180/Math.PI+360)%360;
-}
-function angDiff(a,b){let d=((a-b)+360)%360;return d>180?360-d:d;}
-function getTrend(id,dev){
-  if(!planeHistory[id]) planeHistory[id]=[];
-  planeHistory[id].push(dev); if(planeHistory[id].length>8) planeHistory[id].shift();
-  const h=planeHistory[id]; if(h.length<3) return 's';
-  const r=h.slice(-3), a1=(r[0]+r[1])/2, a2=(r[1]+r[2])/2;
-  return a2<a1-2?'i':a2>a1+2?'w':'s';
-}
+// לוגיקת הזיהוי נמצאת ב-detect.js (נבדקת אוטומטית ב-CI)
+const { haversine, bearingTo, angDiff } = NatbagDetect;
 
 let osToken=null, osTokenExp=0, osTokenStatus='';
 async function getOpenSkyToken(){
@@ -498,44 +519,10 @@ function processPlanes(arr,isAdsb,radius){
   const devThresh=parseInt(document.getElementById('dt').value)||18;
   let planes=[];
 
+  const ctx={ lat:TLV_LAT, lon:TLV_LON, radius, devThresh, finalKm:FINAL_KM, finalAlt:FINAL_ALT, history:planeHistory };
   arr.forEach(p=>{
-    let lat,lon,alt,vrate,speed,cs,id,og,track=null;
-    if(isAdsb){
-      // adsb: גובה ברגל, קצב אנכי ברגל/דקה, מהירות בקשרים → ממירים למטר, מ'/ש', קמ"ש
-      og=p.alt_baro==='ground';
-      const ft=og?0:(typeof p.alt_baro==='number'?p.alt_baro:p.alt_geom);
-      lat=p.lat;lon=p.lon;
-      alt=ft!=null?ft*0.3048:null;
-      const vr=p.baro_rate!=null?p.baro_rate:p.geom_rate;
-      vrate=vr!=null?vr*0.00508:null;
-      speed=p.gs!=null?p.gs*1.852:0;
-      cs=((p.flight||'').replace(/[@\s]/g,'')||p.r||'').trim(); id=p.hex||'';
-      track=p.track!=null?p.track:p.true_heading;
-    } else {
-      // OpenSky: גובה במטר, מהירות במ'/ש'
-      [id,cs,,,,lon,lat,alt,og,speed,track,vrate]=p;
-      cs=(cs||'').trim(); speed=speed!=null?speed*3.6:0;
-    }
-    if(!lat||!lon) return;
-    const dist=haversine(lat,lon,TLV_LAT,TLV_LON);
-    if(dist>radius*1.1) return;
-    const spd=speed||0;
-    // על הקרקע / מסיע: לא משתתף בלוגיקת הגישה
-    const onGround = og || (spd<80 && (alt==null || alt<150));
-    const bearing=bearingTo(lat,lon,TLV_LAT,TLV_LON);
-    // סטייה = הפרש בין כיוון הטיסה של המטוס לבין הכיוון אל נתב"ג
-    const dev = track!=null ? angDiff(track,bearing) : null;
-    const c1=dist<=radius, c2=alt!=null&&alt<=4000, c3=vrate!=null&&vrate<=-1;
-    const isDeparting = !onGround && vrate!=null && vrate>2;   // מטפס יותר מ-2 מ'/ש' = המראה
-    const isApproach=!onGround && !isDeparting && [c1,c2,c3].filter(Boolean).length>=2;
-    // גישה סופית: קרוב ונמוך – כאן המטוס כבר אמור להיות מיושר לכיוון השדה
-    const isFinal = isApproach && dist<=FINAL_KM && alt!=null && alt<=FINAL_ALT && (vrate==null||vrate<0);
-    const trend=(isFinal&&dev!=null)?getTrend(id,dev):'s';
-    const enoughHistory=(planeHistory[id]||[]).length>=3;   // לפחות 3 קריאות רצופות (~1.5 דק') לפני התרעה
-    const isAlert=isFinal && dev!=null && dev>devThresh && enoughHistory && trend!=='i';
-    const sev=dev==null?'lo':dev>devThresh*2?'hi':dev>devThresh*1.4?'me':'lo';
-    const eta=(!onGround&&spd>60)?Math.round((dist/spd)*60):null;
-    planes.push({icao24:id,callsign:cs,lat,lon,track,alt,vrate,speed:spd,dist,dev,onGround,isDeparting,isApproach,isFinal,isAlert,sev,trend,eta,c1,c2,c3});
+    const n=NatbagDetect.normalize(p,isAdsb); if(!n) return;
+    const c=NatbagDetect.classify(n,ctx);     if(c) planes.push(c);
   });
 
   planes.sort((a,b)=>a.dist-b.dist);
@@ -552,6 +539,7 @@ function processPlanes(arr,isAdsb,radius){
   });
 
   document.getElementById('cnt').textContent=planes.length;
+  document.getElementById('cnt2').textContent=planes.length;
   document.getElementById('s1').textContent=planes.length;
   document.getElementById('s2').textContent=planes.filter(p=>p.isApproach).length;
 
@@ -604,6 +592,16 @@ document.getElementById('btnD').addEventListener('click',()=>{
   if(demoMode){ b.classList.add('on'); b.textContent='🧪 יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; initDemo(); demoTick(); demoTimer=setInterval(demoTick,3000); }
   else{ b.classList.remove('on'); b.textContent='🧪 הדגמה'; clearInterval(demoTimer); demoPlanes=[]; processPlanes([],true,80); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
 });
+
+// ===================== PHONE TABS =====================
+let mapShown=false;
+document.querySelectorAll('#mtabs button').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.tab; document.body.dataset.tab=t;
+  document.querySelectorAll('#mtabs button').forEach(x=>x.classList.toggle('on',x===b));
+  if(t==='cp') resizeGlobe();
+  if(t==='rp' && map) setTimeout(()=>{ map.invalidateSize(); if(!mapShown){ map.setView([TLV_LAT,TLV_LON],10); mapShown=true; } },30);
+}));
+document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.classList.toggle('cfg-open'); setTimeout(resizeGlobe,30); });
 
 // ===================== INIT =====================
 window.addEventListener('resize',()=>{ resizeGlobe(); setTimeout(()=>map&&map.invalidateSize(),100); });

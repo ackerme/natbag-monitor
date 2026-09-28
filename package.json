@@ -1,0 +1,9 @@
+{
+  "name": "natbag-monitor",
+  "private": true,
+  "description": "ניטור גישה לנתב\"ג בזמן אמת",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": { "node": ">=22" }
+}

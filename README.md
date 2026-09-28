@@ -1,5 +1,7 @@
 # ✈️ natbag-monitor – ניטור גישה לנתב"ג בזמן אמת
 
+![CI/CD](https://github.com/<USERNAME>/natbag-monitor/actions/workflows/ci-cd.yml/badge.svg)
+
 מערכת שמציגה בזמן אמת את המטוסים באזור נמל התעופה בן גוריון, על מסך רדאר סורק ועל מפת לוויין.
 היא מזהה אוטומטית מטוסים בגישה לנחיתה ומתריעה כשמטוס בגישה הסופית סוטה מהכיוון לשדה.
 
@@ -41,9 +43,25 @@ flowchart LR
 - **CloudWatch Logs:** הלוגים נשמרים 3 ימים, כדי שלא תצטבר עלות אחסון.
 - **IAM:** לכל פונקציה יש רק את ההרשאות שהיא צריכה (least privilege).
 
+## CI/CD
+
+```mermaid
+flowchart LR
+    D[git push] --> T[GitHub Actions<br/>npm test · 21 בדיקות]
+    T -->|עבר, ב-main| O[OIDC → AWS<br/>בלי מפתחות שמורים]
+    O --> S[sam deploy]
+    S --> H[Smoke test<br/>/health + /aircraft]
+```
+
+- **בדיקות** (`tests/`): 21 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
+  - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
+  - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
+- **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
+- **Smoke test:** אחרי כל פריסה ה-workflow בודק שהשרת החדש עונה.
+
 ## לוגיקת הזיהוי
 
-המערכת לא בודקת פרמטר בודד. היא משלבת כמה נתונים מתוך ה-ADS-B כדי לצמצם התרעות שווא:
+הקוד נמצא ב-`detect.js` ונבדק ב-`tests/detect.test.mjs`. המערכת לא בודקת פרמטר בודד. היא משלבת כמה נתונים מתוך ה-ADS-B כדי לצמצם התרעות שווא:
 
 1. **סינון מטוסים על הקרקע:** מטוס עם `alt_baro = ground`, או מהירות מתחת ל-80 קמ"ש בגובה נמוך, לא משתתף בלוגיקה.
 2. **זיהוי המראה:** מטוס שמטפס ביותר מ-2 מ'/ש' מסומן כהמראה ולא כגישה.
@@ -75,7 +93,7 @@ sam deploy --guided
 
 ## טכנולוגיות
 
-`JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
+`GitHub Actions` · `OIDC` · `node:test` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
 
 ## מקורות נתונים
 
