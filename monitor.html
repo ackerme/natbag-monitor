@@ -60,6 +60,35 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 #det .ft{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:.72rem;color:#6f86b8}
 #det .ft a{color:#5ab0ff}
 #gc{cursor:crosshair}
+/* התרעת תנועה אווירית – פס בראש המסך, שונה מהתרעת מטוס בודד */
+#airAlert{display:none;position:fixed;top:92px;left:50%;transform:translateX(-50%);z-index:9000;width:min(560px,94vw);
+  align-items:flex-start;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid #a07a18;
+  background:linear-gradient(135deg,#2b2106,#171004);color:#ffe9b0;box-shadow:0 10px 40px #000c,0 0 0 1px #ffb64022 inset}
+#airAlert.on{display:flex;animation:aaIn .35s ease-out}
+#airAlert.major{border-color:#c2481c;background:linear-gradient(135deg,#3a1206,#1c0803);color:#ffd2bd}
+#airAlert.normal{border-color:#1f6a3e;background:linear-gradient(135deg,#0b2616,#06140b);color:#bff5d3}
+@keyframes aaIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+#airAlert .aa-ic{font-size:1.7rem;line-height:1}
+#airAlert .aa-tx{flex:1;min-width:0;font-size:.82rem;line-height:1.5}
+#airAlert .aa-tx b{display:block;font-size:.98rem;margin-bottom:2px}
+#airAlert .aa-tx small{opacity:.7;font-size:.7rem}
+#airAlert .aa-act{display:flex;flex-direction:column;gap:6px}
+#airAlert button{background:#0006;border:1px solid #ffffff30;color:inherit;border-radius:8px;min-width:32px;height:30px;cursor:pointer;font-size:.8rem;padding:0 8px}
+#airAlert.normal #aaMore,#airAlert.normal #aaMute{display:none}
+#airstBody .ev{font-size:.72rem;color:#9fb0d6;margin-top:6px}
+#airstBody .ev span{display:inline-block;margin-inline-end:8px}
+#airstBody .nb{margin-top:6px;background:#132449;border:1px solid #2a4a8a;color:#cfe0ff;border-radius:6px;padding:3px 9px;font-size:.72rem;cursor:pointer}
+#airst{position:absolute;top:10px;right:10px;z-index:5;max-width:min(380px,calc(100% - 20px));font-size:.78rem}
+#airst>button{display:flex;align-items:center;gap:6px;border-radius:18px;padding:5px 12px;border:1px solid #1f6a3e;cursor:pointer;
+  font-weight:700;font-size:.78rem;background:#0b1a12;color:#7dffb0;text-align:right}
+#airst>button small{font-weight:400;opacity:.75}
+#airst.unusual>button{background:#2a2206;color:#ffd45a;border-color:#8a6a10;animation:airpulse 1.8s infinite}
+#airst.major>button{background:#2e0f06;color:#ff9a6a;border-color:#a0381a;animation:airpulse 1s infinite}
+@keyframes airpulse{50%{box-shadow:0 0 0 5px #ffb64030}}
+#airstBody{display:none;margin-top:6px;background:#0a1024f2;border:1px solid #1c2b55;border-radius:10px;padding:10px 12px;color:#c7d5f5;line-height:1.5}
+#airst.open #airstBody{display:block}
+#airstBody ul{margin:0 0 4px;padding-inline-start:18px}
+#airstBody .note{font-size:.68rem;color:#7a90bb;border-top:1px solid #1c2b55;padding-top:6px;margin-top:6px}
 .pc.al{border-color:#ff4400;background:#180800}
 .pc .cs{font-size:.82rem;font-weight:700;color:#7ac8ff}
 .pc .mt{font-size:.7rem;color:#4a70aa;margin-top:2px}
@@ -134,6 +163,8 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   #det .gr b{font-size:.78rem}
   #det .gr span{font-size:.58rem}
   #det .ft{margin-top:7px;font-size:.66rem}
+  #airAlert{top:128px;padding:10px 12px}
+  #airAlert .aa-ic{font-size:1.4rem}
 }
 </style>
 </head>
@@ -169,6 +200,7 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 
   <div id="cp">
     <canvas id="gc"></canvas>
+    <div id="airst" class="normal"><button id="airstBtn" type="button">✅ תנועה אווירית רגילה</button><div id="airstBody"></div></div>
   </div>
 
   <div id="rp">
@@ -182,6 +214,12 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   </div>
 </div>
 
+<div id="airAlert" role="alert" aria-live="assertive">
+  <div class="aa-ic">📡</div>
+  <div class="aa-tx"><b id="aaTitle"></b><div id="aaReasons"></div><small><span id="aaTime"></span> · התרעת תנועה אווירית, לא התרעת פיקוד העורף</small></div>
+  <div class="aa-act"><button id="aaClose" title="סגור">✕</button><button id="aaMute" title="השתק צליל">🔊</button><button id="aaMore" title="פרטים">פרטים</button></div>
+</div>
+
 <div id="det"></div>
 
 <nav id="mtabs">
@@ -192,7 +230,7 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 
 <div id="ab">
   <div style="font-size:1.8rem"><span class="sn">🚨</span></div>
-  <h2>⚠ גישה חריגה</h2>
+  <h2>✈ סטייה בגישה – מטוס בודד</h2>
   <div id="acs" style="font-size:.95rem;color:#ffcc88;margin-bottom:4px"></div>
   <div class="aeta" id="aeta">-- דק'</div>
   <div class="ainf" id="ainf"></div>
@@ -250,7 +288,7 @@ L.circle([TLV_LAT, TLV_LON], {radius:FINAL_KM*1000,color:'#ffaa00',fillColor:'#f
 
 const mapTrails = {};
 function planeIcon(p, sel) {
-  const col = sel ? '#ffd24a' : p.isAlert ? '#ff5a3c' : p.onGround ? '#9aa6b2' : p.isFinal ? '#50d2ff' : '#e8f0ff';
+  const col = sel ? '#ffd24a' : p.isAlert ? '#ff5a3c' : p.onGround ? '#9aa6b2' : p.isHolding ? '#ffb640' : p.isTurnBack ? '#c9a0ff' : p.isFinal ? '#50d2ff' : '#e8f0ff';
   const rot = (p.track ?? 90) - 90;                 // הצורה מצוירת כשהאף פונה מזרחה (90°)
   const size = p.onGround ? 16 : 26;
   const label = p.onGround ? '' : `<div style="position:absolute;top:${size-2}px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:${sel?'#ffd24a':'#fff'};text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap">${esc(p.callsign||'')}</div>`;
@@ -379,7 +417,7 @@ function drawBlips(sweepDeg){
     // כמה זמן עבר מאז שהקרן עברה על המטוס → דהייה
     const age=(((sweepDeg-brg)%360)+360)%360/360;
     const glow=Math.max(0.25, 1-age);
-    const col = p.isAlert?[255,70,40] : p.onGround?[140,160,170] : p.isFinal?[80,210,255] : [80,255,140];
+    const col = p.isAlert?[255,70,40] : p.onGround?[140,160,170] : p.isHolding?[255,182,64] : p.isTurnBack?[200,150,255] : p.isFinal?[80,210,255] : [80,255,140];
     const c=a=>`rgba(${col[0]},${col[1]},${col[2]},${a})`;
     // קו כיוון טיסה
     if(p.track!=null && !p.onGround){
@@ -559,16 +597,24 @@ function initDemo(){
     const r=ang*Math.PI/180;
     return {hex:'demo'+i, flight:cs,
       lat:TLV_LAT+Math.cos(r)*d/111, lon:TLV_LON+Math.sin(r)*d/111/0.85,
-      alt_baro:2000+Math.random()*12000, baro_rate:-(Math.random()*1500), gs:180+Math.random()*250};
+      alt_baro:2000+Math.random()*12000, baro_rate:-(Math.random()*1500), gs:180+Math.random()*250,
+      // 3 מטוסים בהמתנה (מעגלים) – כדי להדגים את מדד החריגה
+      hold: [4,6,8].includes(i) ? {clat:TLV_LAT+Math.cos(r)*0.3, clon:TLV_LON+Math.sin(r)*0.35, ang:0} : null};
   });
 }
 function demoTick(){
   demoPlanes.forEach(p=>{
+    if(p.hold){                                   // טס במעגל ברדיוס ~6 ק"מ
+      p.hold.ang+=0.35;
+      p.lat=p.hold.clat+Math.cos(p.hold.ang)*0.055; p.lon=p.hold.clon+Math.sin(p.hold.ang)*0.065;
+      p.track=((p.hold.ang*180/Math.PI)+90)%360; p.alt_baro=10000; p.baro_rate=0;
+      return;
+    }
     const b=bearingTo(p.lat,p.lon,TLV_LAT,TLV_LON)*Math.PI/180;
     p.lat+=Math.cos(b)*0.012; p.lon+=Math.sin(b)*0.012;
     p.alt_baro=Math.max(300,p.alt_baro-150);
     p.track=(bearingTo(p.lat,p.lon,TLV_LAT,TLV_LON)+(p.hex==='demo3'?65:(Math.random()*10-5))+360)%360;  // demo3 = מטוס שסוטה, להדגמת התרעה
-    if(haversine(p.lat,p.lon,TLV_LAT,TLV_LON)<3){ const r=Math.random()*Math.PI*2; p.lat=TLV_LAT+Math.cos(r)*0.7; p.lon=TLV_LON+Math.sin(r)*0.8; p.alt_baro=12000; }
+    if(haversine(p.lat,p.lon,TLV_LAT,TLV_LON)<3){ delete trails[p.hex]; const r=Math.random()*Math.PI*2; p.lat=TLV_LAT+Math.cos(r)*0.7; p.lon=TLV_LON+Math.sin(r)*0.8; p.alt_baro=12000; }
   });
   document.getElementById('dot').className='ok';
   document.getElementById('lastUp').textContent='הדגמה: '+new Date().toLocaleTimeString('he-IL');
@@ -589,6 +635,7 @@ function processPlanes(arr,isAdsb,radius){
   planes.sort((a,b)=>a.dist-b.dist);
   radarPlanes=planes;
   recordTrails(planes);
+  updateAirspace(planes);
 
   // Alert
   planes.filter(p=>p.isAlert).forEach(p=>{
@@ -631,6 +678,8 @@ function renderList(planes){
       ${p.onGround?`<div class="dv" style="color:#7a8aaa">🅿 על הקרקע</div>`:''}
       ${p.isDeparting?`<div class="dv" style="color:#c9a0ff">🛫 המראה</div>`:''}
       ${p.isFinal?`<div class="dv" style="color:#66ccff">🛬 גישה סופית</div>`:''}
+      ${p.isHolding?`<div class="dv" style="color:#ffb640">🔄 בהמתנה (מעגלים)</div>`:''}
+      ${p.isTurnBack?`<div class="dv" style="color:#c9a0ff">↩ הסתובב והתרחק מהשדה</div>`:''}
       ${p.isApproach?`<div class="dv ${p.isAlert?p.sev:''}" style="${p.isAlert?'':'color:#8ab'}">סטייה מכיוון נתב"ג: ${p.dev!=null?p.dev.toFixed(0)+'°':'--'} ${p.isFinal?{w:'↗',i:'↘',s:'→'}[p.trend]:''}</div>
       <div class="cb"><span class="${p.c1?'m':''}">📍מרחק</span><span class="${p.c2?'m':''}">📏גובה</span><span class="${p.c3?'m':''}">⬇ירידה</span></div>`:''}
     </div>`; }).join('');
@@ -689,6 +738,7 @@ function renderDetails(){
           : p.squawk==='7600'?['📻 תקלת קשר (7600)','#5a3a10']
           : p.isAlert?['🚨 התרעת סטייה','#5a1510'] : p.onGround?['🅿 על הקרקע','#1d2638']
           : p.isDeparting?['🛫 המראה','#2a1b4a'] : p.isFinal?['🛬 גישה סופית','#0f3550']
+          : p.isHolding?['🔄 בהמתנה (טס במעגלים)','#4a3508'] : p.isTurnBack?['↩ הסתובב והתרחק מהשדה','#35204a']
           : p.isApproach?['↘ בגישה לנתב"ג','#123a2a'] : ['✈ בטיסה','#132449'];
   el.innerHTML=`
    <div class="hd">${logoImg(al,'logo')}
@@ -713,6 +763,112 @@ function renderDetails(){
 document.getElementById('plist').addEventListener('click',e=>{ const c=e.target.closest('.pc'); if(c) selectPlane(c.dataset.id); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&selectedId) closeDetails(); });
 
+// ===================== AIRSPACE ALERT (סוג התרעה נפרד) =====================
+// שונה מהתרעת "מטוס בודד": פס כתום בראש המסך, צליל משלה, והתראת דפדפן.
+const LEVEL_RANK={normal:0,unusual:1,major:2};
+const airEvents=[];                       // היסטוריה: {t, level}
+let lastAirLevel='normal', airMuted=false, audioCtx=null, airAlertHide=null;
+
+function ensureAudio(){
+  try{ audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') audioCtx.resume(); }catch(e){}
+}
+document.addEventListener('click',ensureAudio);      // דפדפנים מאפשרים צליל רק אחרי לחיצה של המשתמש
+
+// צליל שונה לכל רמה: שני צלילים עולים (חריגה), ארבעה צלילים מתחלפים (חריגה משמעותית)
+function airChime(level){
+  if(airMuted||!audioCtx) return;
+  const notes = level==='major' ? [660,880,660,880] : [523,784];
+  const t0=audioCtx.currentTime;
+  notes.forEach((f,i)=>{
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain(), t=t0+i*0.22;
+    o.type='triangle'; o.frequency.value=f;
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.2);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+0.21);
+  });
+}
+
+function onAirLevel(s){
+  const prev=lastAirLevel, now=Date.now();
+  if(s.level!==prev){ airEvents.unshift({t:now, level:s.level}); if(airEvents.length>20) airEvents.pop(); }
+  if(LEVEL_RANK[s.level]>LEVEL_RANK[prev]) showAirAlert(s);
+  else if(s.level==='normal' && prev!=='normal') showAirNormal();
+  lastAirLevel=s.level;
+  renderAirspace();
+  document.title=(s.level==='normal'?'':(s.level==='major'?'🔶 ':'⚠ '))+'מוניטור נתב"ג';
+}
+
+function showAirAlert(s){
+  const el=document.getElementById('airAlert');
+  el.className='on '+s.level;
+  document.getElementById('aaTitle').textContent = s.level==='major' ? 'חריגה משמעותית בתנועה האווירית בנתב"ג' : 'חריגה בתנועה האווירית בנתב"ג';
+  document.getElementById('aaReasons').innerHTML = s.reasons.map(r=>`<div>• ${esc(r)}</div>`).join('');
+  document.getElementById('aaTime').textContent = new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('aaMute').textContent = airMuted?'🔇':'🔊';
+  airChime(s.level);
+  clearTimeout(airAlertHide); airAlertHide=setTimeout(hideAirAlert, 60e3);
+  if(document.hidden && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification(document.getElementById('aaTitle').textContent,{ body:s.reasons.join(' · '), icon:'favicon-32.png', tag:'natbag-airspace' }); }catch(e){}
+  }
+}
+function showAirNormal(){
+  const el=document.getElementById('airAlert');
+  el.className='on normal';
+  document.getElementById('aaTitle').textContent='התנועה האווירית בנתב"ג חזרה לשגרה';
+  document.getElementById('aaReasons').innerHTML='';
+  document.getElementById('aaTime').textContent=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  clearTimeout(airAlertHide); airAlertHide=setTimeout(hideAirAlert, 8e3);
+}
+function hideAirAlert(){ document.getElementById('airAlert').className=''; }
+document.getElementById('aaClose').addEventListener('click',hideAirAlert);
+document.getElementById('aaMute').addEventListener('click',e=>{ airMuted=!airMuted; e.currentTarget.textContent=airMuted?'🔇':'🔊'; });
+document.getElementById('aaMore').addEventListener('click',()=>{
+  hideAirAlert(); if(document.body.dataset.tab!=='cp') document.querySelector('#mtabs button[data-tab=cp]').click();
+  document.getElementById('airst').classList.add('open');
+});
+
+// ===================== AIRSPACE ANOMALY =====================
+// מדד חריגה בתנועה האווירית – לא מערכת התרעה
+const airHistory=[], approachSeen={}, lastDist={};
+let airStatus=null;
+function resetAirspace(){
+  airHistory.length=0;
+  [approachSeen,lastDist,trails,planeHistory].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
+  airStatus=null; lastAirLevel='normal'; hideAirAlert(); document.title='מוניטור נתב"ג'; renderAirspace();
+}
+function updateAirspace(planes){
+  const now=Date.now(); let holding=0, turnBacks=0, emergencies=0;
+  planes.forEach(p=>{
+    p.isHolding = !p.onGround && NatbagDetect.isHolding(trails[p.icao24]);
+    if(p.isApproach) approachSeen[p.icao24]=now;
+    p.isTurnBack = NatbagDetect.isTurnBack({
+      wasApproaching: approachSeen[p.icao24] && now-approachSeen[p.icao24] <= 10*60e3,
+      onGround:p.onGround, isApproach:p.isApproach, dev:p.dev, prevDist:lastDist[p.icao24], dist:p.dist });
+    lastDist[p.icao24]=p.dist;
+    if(p.isHolding) holding++;
+    if(p.isTurnBack) turnBacks++;
+    if(p.squawk==='7700'||p.squawk==='7600') emergencies++;
+  });
+  airHistory.push({ t:now, airborne:planes.filter(p=>!p.onGround).length, finals:planes.filter(p=>p.isFinal).length, holding, turnBacks, emergencies });
+  while(airHistory.length && now-airHistory[0].t > 60*60e3) airHistory.shift();
+  airStatus=NatbagDetect.airspaceStatus(airHistory, now);
+  onAirLevel(airStatus);
+  renderAirspace();
+}
+function renderAirspace(){
+  const box=document.getElementById('airst'), s=airStatus||{level:'normal',reasons:[],baselineReady:false,collectedMin:0};
+  const lab={normal:['✅','תנועה אווירית רגילה'],unusual:['⚠','חריגה בתנועה האווירית'],major:['🔶','חריגה משמעותית בתנועה האווירית']}[s.level];
+  box.classList.remove('normal','unusual','major'); box.classList.add(s.level);
+  document.getElementById('airstBtn').innerHTML = `${lab[0]} ${lab[1]}` +
+    (s.baselineReady?'':` <small>· לומד את הקצב הרגיל (${Math.min(s.collectedMin,10)}/10 דק')</small>`);
+  document.getElementById('airstBody').innerHTML =
+    (s.reasons.length?`<ul>${s.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:'לא זוהו סימנים חריגים.') +
+    (airEvents.length?`<div class="ev">היסטוריה: ${airEvents.slice(0,6).map(e=>`<span>${new Date(e.t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})} ${{normal:'✅ שגרה',unusual:'⚠ חריגה',major:'🔶 משמעותית'}[e.level]}</span>`).join('')}</div>`:'') +
+    (('Notification' in window && Notification.permission==='default')?`<button class="nb" onclick="Notification.requestPermission().then(renderAirspace)">🔔 קבל התראה גם כשהדף ברקע</button>`:'') +
+    `<div class="note">המדד מתבסס על התנועה האווירית בלבד: מטוסים בהמתנה, מטוסים שהסתובבו, נחיתות שנעצרו, ירידה במספר המטוסים וקודי חירום.
+     ההתרעה שלו <b>אינה</b> התרעת פיקוד העורף ולא יודעת לחזות אירועים ביטחוניים. להתרעות ולהנחיות – אפליקציית פיקוד העורף.</div>`;
+}
+document.getElementById('airstBtn').addEventListener('click',()=>{ renderAirspace(); document.getElementById('airst').classList.toggle('open'); });
+
 // ===================== CONTROLS =====================
 function startMonitor(){
   running=true; fetchGen++;
@@ -730,8 +886,8 @@ document.getElementById('btnT').addEventListener('click',()=> running?stopMonito
 document.getElementById('btnD').addEventListener('click',()=>{
   demoMode=!demoMode;
   const b=document.getElementById('btnD');
-  if(demoMode){ b.classList.add('on'); b.textContent='🧪 יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; initDemo(); demoTick(); demoTimer=setInterval(demoTick,3000); }
-  else{ b.classList.remove('on'); b.textContent='🧪 הדגמה'; clearInterval(demoTimer); demoPlanes=[]; processPlanes([],true,80); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
+  if(demoMode){ b.classList.add('on'); b.textContent='🧪 יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; resetAirspace(); initDemo(); demoTick(); demoTimer=setInterval(demoTick,3000); }
+  else{ b.classList.remove('on'); b.textContent='🧪 הדגמה'; clearInterval(demoTimer); demoPlanes=[]; processPlanes([],true,80); resetAirspace(); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
 });
 
 // ===================== PHONE TABS =====================

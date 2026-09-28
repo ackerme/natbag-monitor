@@ -101,7 +101,71 @@
     };
   }
 
-  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify };
+  // ───────────── מדד חריגה בתנועה האווירית ─────────────
+  // שים לב: זה מדד לתנועה האווירית בלבד, לא מערכת התרעה.
+
+  // האם השובל של מטוס מראה המתנה (סיבוב מלא): סכום הפניות ≥ 300°
+  function isHolding(trail) {
+    if (!trail || trail.length < 4) return false;
+    const segs = [];
+    for (let i = 1; i < trail.length; i++) {
+      const a = trail[i - 1], b = trail[i];
+      const d = haversine(a.lat, a.lon, b.lat, b.lon);
+      if (d < 0.3) continue;                    // תזוזה קטנה מדי = רעש
+      if (d > 20) { segs.length = 0; continue; } // קפיצה לא הגיונית (נקודה שגויה) – מתחילים מחדש
+      segs.push(bearingTo(a.lat, a.lon, b.lat, b.lon));
+    }
+    if (segs.length < 3) return false;
+    let turn = 0;
+    for (let i = 1; i < segs.length; i++) turn += ((segs[i] - segs[i - 1] + 540) % 360) - 180;
+    return Math.abs(turn) >= 300;
+  }
+
+  // מטוס שהיה בגישה בעשר הדקות האחרונות, ועכשיו פונה מהשדה ומתרחק
+  function isTurnBack({ wasApproaching, onGround, isApproach, dev, prevDist, dist }) {
+    return !!wasApproaching && !onGround && !isApproach && dev != null && dev > 120 &&
+           prevDist != null && dist > prevDist + 0.5;
+  }
+
+  /**
+   * history: [{ t, airborne, finals, holding, turnBacks, emergencies }] – דגימה אחת בכל רענון
+   * מחזיר { level: 'normal'|'unusual'|'major', score, reasons[], baselineReady, collectedMin }
+   */
+  function airspaceStatus(history, now) {
+    const reasons = [];
+    let score = 0;
+    if (!history || !history.length) return { level: 'normal', score: 0, reasons, baselineReady: false, collectedMin: 0 };
+    const cur = history[history.length - 1];
+    const recent = history.filter(h => now - h.t <= 10 * 60e3);
+    const base = history.filter(h => now - h.t > 10 * 60e3 && now - h.t <= 60 * 60e3);
+    const collectedMin = Math.round((now - history[0].t) / 60e3);
+    const baselineReady = base.length >= 5 && (base[base.length - 1].t - base[0].t) >= 10 * 60e3;
+    const avg = (arr, k) => arr.reduce((s, h) => s + (h[k] || 0), 0) / arr.length;
+
+    if (cur.holding >= 3) { score += 2; reasons.push(`${cur.holding} מטוסים בהמתנה (טסים במעגלים)`); }
+    else if (cur.holding >= 1) { score += 1; reasons.push(`${cur.holding === 1 ? 'מטוס אחד' : cur.holding + ' מטוסים'} בהמתנה (טס במעגלים)`); }
+
+    const turnBacks = Math.max(0, ...recent.map(h => h.turnBacks || 0));
+    if (turnBacks >= 2) { score += 2; reasons.push(`${turnBacks} מטוסים שהיו בגישה לנתב"ג הסתובבו והתרחקו`); }
+    else if (turnBacks === 1) { score += 1; reasons.push('מטוס שהיה בגישה לנתב"ג הסתובב והתרחק'); }
+
+    if (cur.emergencies >= 1) { score += 2; reasons.push('מטוס משדר קוד חירום (7700/7600)'); }
+
+    if (baselineReady) {
+      const baseFinals = avg(base, 'finals'), baseAir = avg(base, 'airborne');
+      const recentFinals = Math.max(...recent.map(h => h.finals || 0));
+      if (recentFinals === 0 && baseFinals >= 1.5) {
+        score += 3; reasons.push(`אין מטוסים בגישה סופית ב-10 הדקות האחרונות (בדרך כלל ~${baseFinals.toFixed(1)})`);
+      }
+      if (baseAir >= 6 && cur.airborne <= baseAir * 0.4) {
+        score += 2; reasons.push(`ירידה חדה במספר המטוסים באוויר (${cur.airborne} לעומת ממוצע ${Math.round(baseAir)})`);
+      }
+    }
+    const level = score >= 4 ? 'major' : score >= 2 ? 'unusual' : 'normal';
+    return { level, score, reasons, baselineReady, collectedMin };
+  }
+
+  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NatbagDetect = api;
 })(typeof window !== 'undefined' ? window : globalThis);
