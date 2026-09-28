@@ -40,6 +40,26 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 #plist::-webkit-scrollbar-thumb{background:#2a4a8a}
 .pc{background:#0c1330;border:1px solid #1c2e58;border-radius:7px;margin-bottom:4px;padding:7px 9px;cursor:pointer;transition:border-color .2s}
 .pc:hover{border-color:#4a7aff}
+.pc.sel{border-color:#ffd24a;box-shadow:inset 0 0 0 1px #ffd24a}
+.pc .al-row{display:flex;align-items:center;gap:6px;font-size:.72rem;color:#8aa0cc;margin-top:3px;flex-wrap:wrap}
+.pc .al-row img{width:18px;height:18px;border-radius:4px;background:#fff;object-fit:contain}
+.pc .typ{color:#6f86b8;direction:ltr;unicode-bidi:isolate}
+#det{display:none;position:fixed;z-index:950;left:50%;bottom:18px;transform:translateX(-50%);width:min(440px,94vw);
+  background:linear-gradient(160deg,#0f1a3d,#08102a);border:1px solid #2a4a8a;border-radius:14px;box-shadow:0 12px 40px #000a;padding:14px 16px}
+#det.on{display:block}
+#det .hd{display:flex;align-items:center;gap:10px}
+#det .logo{width:40px;height:40px;border-radius:8px;background:#fff;object-fit:contain;flex-shrink:0}
+#det .nm{font-size:1.15rem;font-weight:800;color:#e6f0ff}
+#det .sub{font-size:.8rem;color:#8aa0cc}
+#det .x{margin-right:auto;background:none;border:1px solid #2a4a8a;color:#aabbdd;border-radius:8px;width:30px;height:30px;cursor:pointer;flex-shrink:0}
+#det .st{display:inline-block;margin-top:8px;font-size:.75rem;padding:2px 10px;border-radius:12px;color:#e6f0ff}
+#det .gr{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+#det .gr div{background:#0a1430;border:1px solid #1a2a55;border-radius:8px;padding:6px 8px}
+#det .gr b{display:block;font-size:.92rem;color:#dfe9ff}
+#det .gr span{font-size:.66rem;color:#7a90bb}
+#det .ft{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:.72rem;color:#6f86b8}
+#det .ft a{color:#5ab0ff}
+#gc{cursor:crosshair}
 .pc.al{border-color:#ff4400;background:#180800}
 .pc .cs{font-size:.82rem;font-weight:700;color:#7ac8ff}
 .pc .mt{font-size:.7rem;color:#4a70aa;margin-top:2px}
@@ -104,6 +124,16 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   #mtabs button b{background:#1d3566;color:#cfe0ff;border-radius:9px;padding:0 6px;font-size:.68rem;font-weight:600}
   #mtabs button.on{color:#3dff8c;border-top-color:#3dff8c}
   #ab{width:92vw;min-width:0;top:80px;padding:12px 14px}
+  #det{bottom:66px;padding:10px 12px;max-height:46dvh;overflow-y:auto}
+  #det .logo{width:32px;height:32px}
+  #det .nm{font-size:1rem}
+  #det .x{width:28px;height:28px}
+  #det .st{margin-top:5px;font-size:.7rem}
+  #det .gr{grid-template-columns:repeat(3,1fr);gap:5px;margin-top:7px}
+  #det .gr div{padding:4px 6px}
+  #det .gr b{font-size:.78rem}
+  #det .gr span{font-size:.58rem}
+  #det .ft{margin-top:7px;font-size:.66rem}
 }
 </style>
 </head>
@@ -151,6 +181,8 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
     </div>
   </div>
 </div>
+
+<div id="det"></div>
 
 <nav id="mtabs">
   <button data-tab="cp" class="on">📡<span>רדאר</span></button>
@@ -216,12 +248,16 @@ L.circle([TLV_LAT, TLV_LON], {radius:FINAL_KM*1000,color:'#ffaa00',fillColor:'#f
 
 }catch(e){console.warn('map init failed',e);} }
 
-function planeIcon(cs, isAlert) {
-  return L.divIcon({
-    html:`<div style="font-size:18px;transform:rotate(270deg);filter:drop-shadow(0 0 3px ${isAlert?'#ff4400':'#4488ff'})">${isAlert?'🔴':'✈'}</div>
-          <div style="font-size:9px;color:${isAlert?'#ff8844':'#88aaff'};white-space:nowrap;margin-top:-2px">${cs||''}</div>`,
-    className:'', iconAnchor:[10,10]
-  });
+const mapTrails = {};
+function planeIcon(p, sel) {
+  const col = sel ? '#ffd24a' : p.isAlert ? '#ff5a3c' : p.onGround ? '#9aa6b2' : p.isFinal ? '#50d2ff' : '#e8f0ff';
+  const rot = (p.track ?? 90) - 90;                 // הצורה מצוירת כשהאף פונה מזרחה (90°)
+  const size = p.onGround ? 16 : 26;
+  const label = p.onGround ? '' : `<div style="position:absolute;top:${size-2}px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:${sel?'#ffd24a':'#fff'};text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap">${esc(p.callsign||'')}</div>`;
+  return L.divIcon({ className:'', iconSize:[size,size], iconAnchor:[size/2,size/2], html:
+    `<div style="width:${size}px;height:${size}px;transform:rotate(${rot}deg);filter:drop-shadow(0 0 2px #000)${sel?' drop-shadow(0 0 6px #ffd24a)':''}">
+       <svg viewBox="-18 -14 36 28" width="${size}" height="${size}"><path d="M16,0 L6,-2 L-2,-13 L-6,-13 L-1,-2 L-10,-2 L-14,-7 L-17,-7 L-14,0 L-17,7 L-14,7 L-10,2 L-1,2 L-6,13 L-2,13 L6,2 Z" fill="${col}" stroke="#000" stroke-width=".8"/></svg>
+     </div>${label}` });
 }
 
 function updateMapMarkers(planes) {
@@ -229,19 +265,23 @@ function updateMapMarkers(planes) {
   const seen = new Set();
   planes.forEach(p => {
     if(!p.lat||!p.lon) return;
-    seen.add(p.icao24);
-    if(planeMarkers[p.icao24]) {
-      planeMarkers[p.icao24].setLatLng([p.lat,p.lon]);
-      planeMarkers[p.icao24].setIcon(planeIcon(p.callsign, p.isAlert));
+    const id = p.icao24, sel = id===selectedId;
+    seen.add(id);
+    if(planeMarkers[id]) {
+      planeMarkers[id].setLatLng([p.lat,p.lon]).setIcon(planeIcon(p, sel)).setZIndexOffset(sel?1000:0);
     } else {
-      planeMarkers[p.icao24] = L.marker([p.lat,p.lon], {icon:planeIcon(p.callsign, p.isAlert)})
-        .addTo(map)
-        .bindTooltip(`${p.callsign||p.icao24}<br>${p.alt?Math.round(p.alt)+'מ':''}`, {direction:'top'});
+      planeMarkers[id] = L.marker([p.lat,p.lon], {icon:planeIcon(p, sel)}).addTo(map).on('click', () => selectPlane(id));
+    }
+    // שובל
+    const pts = (trails[id]||[]).map(t=>[t.lat,t.lon]);
+    if(pts.length>1) {
+      const style = {color: sel?'#ffd24a':(p.isAlert?'#ff5a3c':'#5ab0ff'), weight: sel?3:2, opacity: sel?0.95:0.6};
+      if(mapTrails[id]) mapTrails[id].setLatLngs(pts).setStyle(style);
+      else mapTrails[id] = L.polyline(pts, {...style, interactive:false}).addTo(map);
     }
   });
-  Object.keys(planeMarkers).forEach(id => {
-    if(!seen.has(id)) { map.removeLayer(planeMarkers[id]); delete planeMarkers[id]; }
-  });
+  Object.keys(planeMarkers).forEach(id => { if(!seen.has(id)) { map.removeLayer(planeMarkers[id]); delete planeMarkers[id]; } });
+  Object.keys(mapTrails).forEach(id => { if(!seen.has(id) || !trails[id]) { map.removeLayer(mapTrails[id]); delete mapTrails[id]; } });
 }
 
 // ===================== RADAR SCOPE =====================
@@ -327,6 +367,15 @@ function drawBlips(sweepDeg){
     if(p.dist>range) return;
     const brg=bearingTo(TLV_LAT,TLV_LON,p.lat,p.lon);
     const [x,y]=polar(brg, p.dist/range);
+    const sel=p.icao24===selectedId;
+    // שובל: המסלול בדקות האחרונות
+    const tr=trails[p.icao24];
+    if(tr && tr.length>1){
+      gx.beginPath();
+      tr.forEach((t,i)=>{ const [tx,ty]=polar(bearingTo(TLV_LAT,TLV_LON,t.lat,t.lon), haversine(TLV_LAT,TLV_LON,t.lat,t.lon)/range);
+        i?gx.lineTo(tx,ty):gx.moveTo(tx,ty); });
+      gx.strokeStyle= sel?'rgba(255,210,74,.85)':'rgba(120,255,170,.22)'; gx.lineWidth=sel?2:1.2; gx.setLineDash([3,3]); gx.stroke(); gx.setLineDash([]);
+    }
     // כמה זמן עבר מאז שהקרן עברה על המטוס → דהייה
     const age=(((sweepDeg-brg)%360)+360)%360/360;
     const glow=Math.max(0.25, 1-age);
@@ -341,13 +390,25 @@ function drawBlips(sweepDeg){
     gx.beginPath(); gx.arc(x,y,p.isAlert?6:p.onGround?2.5:4,0,Math.PI*2);
     gx.fillStyle=c(glow); gx.shadowColor=c(1); gx.shadowBlur=14*glow; gx.fill(); gx.shadowBlur=0;
     if(p.isAlert){ gx.beginPath(); gx.arc(x,y,10+Math.sin(performance.now()/150)*3,0,Math.PI*2); gx.strokeStyle=c(0.7); gx.lineWidth=1.5; gx.stroke(); }
-    if(p.onGround) return;   // על הקרקע: רק נקודה, בלי שם (כולם צפופים ליד המרכז)
-    gx.fillStyle=c(Math.max(0.45,glow));
+    if(sel){ gx.beginPath(); gx.arc(x,y,12,0,Math.PI*2); gx.strokeStyle='#ffd24a'; gx.lineWidth=2; gx.stroke(); }
+    if(p.onGround && !sel) return;   // על הקרקע: רק נקודה, בלי שם (כולם צפופים ליד המרכז)
+    gx.fillStyle= sel?'#ffd24a':c(Math.max(0.45,glow));
     gx.fillText(p.callsign||p.icao24, x+8, y-6);
     gx.fillStyle=c(Math.max(0.3,glow*0.7));
     gx.fillText(p.onGround?'קרקע':(p.alt!=null?Math.round(p.alt)+'מ':''), x+8, y+7);
   });
 }
+
+// לחיצה על הרדאר בוחרת את המטוס הקרוב ביותר
+gc.addEventListener('click',e=>{
+  const r=gc.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const range=parseInt(document.getElementById('ri').value)||80;
+  let best=null, bd=22;
+  radarPlanes.forEach(p=>{ if(p.dist>range) return;
+    const [x,y]=polar(bearingTo(TLV_LAT,TLV_LON,p.lat,p.lon), p.dist/range);
+    const d=Math.hypot(x-mx,y-my); if(d<bd){ bd=d; best=p; } });
+  if(best) selectPlane(best.icao24);
+});
 
 function drawCenter(){
   gx.beginPath(); gx.arc(GCX,GCY,5,0,Math.PI*2); gx.fillStyle='#9fffc8'; gx.fill();
@@ -527,6 +588,7 @@ function processPlanes(arr,isAdsb,radius){
 
   planes.sort((a,b)=>a.dist-b.dist);
   radarPlanes=planes;
+  recordTrails(planes);
 
   // Alert
   planes.filter(p=>p.isAlert).forEach(p=>{
@@ -545,6 +607,7 @@ function processPlanes(arr,isAdsb,radius){
 
   renderList(planes);
   updateMapMarkers(planes);
+  if(selectedId) renderDetails();
 }
 
 let alertHide=null;
@@ -560,17 +623,95 @@ function showAlert(p){
 }
 
 function renderList(planes){
-  document.getElementById('plist').innerHTML=planes.slice(0,25).map(p=>`
-    <div class="pc${p.isAlert?' al':''}">
-      <div class="cs">✈ ${p.callsign||p.icao24}</div>
+  document.getElementById('plist').innerHTML=planes.slice(0,25).map(p=>{ const al=airlineOf(p.callsign); return `
+    <div class="pc${p.isAlert?' al':''}${p.icao24===selectedId?' sel':''}" data-id="${esc(p.icao24)}">
+      <div class="cs">✈ ${esc(p.callsign||p.icao24)}</div>
+      ${(al||p.type)?`<div class="al-row">${logoImg(al,'')}${al?`<span>${esc(al.name)}</span>`:''}${p.type?`<span class="typ">${esc(typeName(p.type))}</span>`:''}</div>`:''}
       <div class="mt">${p.dist.toFixed(1)} ק"מ | ${p.alt?Math.round(p.alt)+'מ':'--'} | ${p.speed?Math.round(p.speed)+' קמ"ש':'--'}</div>
       ${p.onGround?`<div class="dv" style="color:#7a8aaa">🅿 על הקרקע</div>`:''}
       ${p.isDeparting?`<div class="dv" style="color:#c9a0ff">🛫 המראה</div>`:''}
       ${p.isFinal?`<div class="dv" style="color:#66ccff">🛬 גישה סופית</div>`:''}
       ${p.isApproach?`<div class="dv ${p.isAlert?p.sev:''}" style="${p.isAlert?'':'color:#8ab'}">סטייה מכיוון נתב"ג: ${p.dev!=null?p.dev.toFixed(0)+'°':'--'} ${p.isFinal?{w:'↗',i:'↘',s:'→'}[p.trend]:''}</div>
       <div class="cb"><span class="${p.c1?'m':''}">📍מרחק</span><span class="${p.c2?'m':''}">📏גובה</span><span class="${p.c3?'m':''}">⬇ירידה</span></div>`:''}
-    </div>`).join('');
+    </div>`; }).join('');
 }
+
+// ===================== FLIGHT DETAILS =====================
+// חברות תעופה לפי קידומת ה-callsign (ICAO) → שם + קוד IATA ללוגו
+const AIRLINES={ELY:['אל על','LY'],ISR:['ישראייר','6H'],AIZ:['ארקיע','IZ'],THY:['טורקיש','TK'],PGT:['פגסוס','PC'],
+  UAE:['אמירייטס','EK'],FDB:['פליי דובאי','FZ'],ETD:['אתיחאד','EY'],RYR:['ריינאייר','FR'],WZZ:['וויז אייר','W6'],
+  EZY:['איזיג\'ט','U2'],EJU:['איזיג\'ט אירופה','EC'],DLH:['לופטהנזה','LH'],GEC:['לופטהנזה קרגו','LH'],BAW:['בריטיש איירווייז','BA'],
+  AFR:['אייר פראנס','AF'],KLM:['KLM','KL'],SWR:['סוויס','LX'],AUA:['אוסטריאן','OS'],BEL:['בראסלס איירליינס','SN'],
+  ITY:['ITA איירווייז','AZ'],AEE:['אגאן','A3'],LOT:['LOT','LO'],TAP:['TAP פורטוגל','TP'],IBE:['איבריה','IB'],VLG:['וואלינג','VY'],
+  UAL:['יונייטד','UA'],DAL:['דלתא','DL'],AAL:['אמריקן','AA'],ACA:['אייר קנדה','AC'],ETH:['אתיופיאן','ET'],MSR:['אג\'יפטאייר','MS'],
+  RJA:['רויאל ג\'ורדניאן','RJ'],GFA:['גאלף אייר','GF'],AIC:['אייר אינדיה','AI'],CPA:['קתאיי פסיפיק','CX'],FIN:['פינאייר','AY'],
+  SAS:['SAS','SK'],TVS:['סמארטווינגס','QS'],BBG:['בלו בירד','BZ'],SXS:['סאן אקספרס','XQ'],TRA:['טרנסאוויה','HV'],
+  UZB:['אוזבקיסטן איירווייז','HY'],HFY:['היי פליי','5K'],AZG:['סילק ווי','ZP'],CYP:['סייפרוס איירווייז','CY'],TUA:['טורקמניסטן','T5']};
+const TYPES={A319:'Airbus A319',A320:'Airbus A320',A20N:'Airbus A320neo',A321:'Airbus A321',A21N:'Airbus A321neo',
+  A332:'Airbus A330-200',A333:'Airbus A330-300',A339:'Airbus A330-900',A359:'Airbus A350-900',A35K:'Airbus A350-1000',A388:'Airbus A380',
+  B737:'Boeing 737-700',B738:'Boeing 737-800',B739:'Boeing 737-900',B38M:'Boeing 737 MAX 8',B39M:'Boeing 737 MAX 9',
+  B752:'Boeing 757-200',B763:'Boeing 767-300',B772:'Boeing 777-200',B77W:'Boeing 777-300ER',B744:'Boeing 747-400',B748:'Boeing 747-8',
+  B788:'Boeing 787-8',B789:'Boeing 787-9',B78X:'Boeing 787-10',E190:'Embraer 190',E195:'Embraer 195',E75L:'Embraer 175',
+  AT76:'ATR 72-600',AT75:'ATR 72-500',DH8D:'Dash 8 Q400',CRJ9:'CRJ-900',C68A:'Cessna Latitude',GLF6:'Gulfstream G650'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function airlineOf(cs){ const m=/^([A-Z]{3})\d/.exec(cs||''); if(!m) return null;
+  const a=AIRLINES[m[1]]; return a?{code:m[1],name:a[0],iata:a[1]}:{code:m[1],name:m[1],iata:null}; }
+function logoImg(al,cls){ return al&&al.iata?`<img class="${cls}" src="https://pics.avs.io/60/60/${al.iata}.png" alt="" loading="lazy" onerror="this.style.display='none'">`:''; }
+function typeName(t){ return t?(TYPES[t]||t):null; }
+
+// שובל: המיקומים של כל מטוס ב-10 הדקות האחרונות
+const trails={}, TRAIL_MS=10*60*1000;
+function recordTrails(planes){
+  const now=Date.now();
+  planes.forEach(p=>{ if(p.onGround) return;
+    const a=trails[p.icao24]||(trails[p.icao24]=[]); const l=a[a.length-1];
+    if(!l||l.lat!==p.lat||l.lon!==p.lon) a.push({lat:p.lat,lon:p.lon,t:now});
+    while(a.length&&now-a[0].t>TRAIL_MS) a.shift(); if(a.length>30) a.shift(); });
+  Object.keys(trails).forEach(id=>{ const a=trails[id]; if(!a.length||now-a[a.length-1].t>TRAIL_MS) delete trails[id]; });
+}
+
+// בחירת מטוס + חלון פרטים
+let selectedId=null;
+function selectPlane(id){
+  selectedId=id; renderDetails(); renderList(radarPlanes); updateMapMarkers(radarPlanes);
+  const p=radarPlanes.find(x=>x.icao24===id);
+  if(p&&map) map.panTo([p.lat,p.lon]);
+}
+function closeDetails(){ selectedId=null; renderDetails(); renderList(radarPlanes); updateMapMarkers(radarPlanes); }
+function renderDetails(){
+  const el=document.getElementById('det');
+  if(!selectedId){ el.classList.remove('on'); return; }
+  const p=radarPlanes.find(x=>x.icao24===selectedId);
+  if(!p){ el.innerHTML=`<div class="hd"><div class="nm">המטוס יצא מהטווח</div><button class="x" onclick="closeDetails()">✕</button></div>`; el.classList.add('on'); return; }
+  const al=airlineOf(p.callsign);
+  const f=(v,d=0)=>v==null||isNaN(v)?'--':Number(v).toLocaleString('he-IL',{maximumFractionDigits:d});
+  const st= p.squawk==='7700'?['🆘 מצב חירום (7700)','#6a1010']
+          : p.squawk==='7600'?['📻 תקלת קשר (7600)','#5a3a10']
+          : p.isAlert?['🚨 התרעת סטייה','#5a1510'] : p.onGround?['🅿 על הקרקע','#1d2638']
+          : p.isDeparting?['🛫 המראה','#2a1b4a'] : p.isFinal?['🛬 גישה סופית','#0f3550']
+          : p.isApproach?['↘ בגישה לנתב"ג','#123a2a'] : ['✈ בטיסה','#132449'];
+  el.innerHTML=`
+   <div class="hd">${logoImg(al,'logo')}
+     <div><div class="nm">${esc(p.callsign||p.icao24)}</div><div class="sub">${esc(al?al.name:'חברה לא מזוהה')}${p.reg?' · <span dir="ltr">'+esc(p.reg)+'</span>':''}</div></div>
+     <button class="x" onclick="closeDetails()" title="סגור">✕</button></div>
+   <span class="st" style="background:${st[1]}">${st[0]}</span>
+   <div class="gr">
+     <div><b dir="ltr">${esc(typeName(p.type)||'--')}</b><span>סוג מטוס</span></div>
+     <div><b>${p.onGround?'קרקע':f(p.alt)+' מ\''}</b><span>גובה${p.alt&&!p.onGround?' · '+f(p.alt/0.3048)+' רגל':''}</span></div>
+     <div><b>${f(p.speed)} קמ"ש</b><span>מהירות קרקע</span></div>
+     <div><b>${p.vrate==null?'--':(p.vrate>0?'+':'')+f(p.vrate,1)+' מ\'/ש\''}</b><span>קצב אנכי</span></div>
+     <div><b>${p.track==null?'--':f(p.track)+'°'}</b><span>כיוון טיסה</span></div>
+     <div><b>${f(p.dist,1)} ק"מ</b><span>מרחק מנתב"ג</span></div>
+     ${p.isApproach&&p.eta!=null?`<div><b>~${p.eta} דק'</b><span>זמן משוער לשדה</span></div>`:''}
+     ${p.isApproach&&p.dev!=null?`<div><b>${f(p.dev)}°</b><span>סטייה מהכיוון לשדה</span></div>`:''}
+     <div><b dir="ltr">${esc(p.squawk||'--')}</b><span>Squawk</span></div>
+   </div>
+   <div class="ft"><span dir="ltr">ICAO ${esc(String(p.icao24).toUpperCase())}</span>
+     <a href="https://adsb.lol/?icao=${encodeURIComponent(p.icao24)}" target="_blank" rel="noopener">מסלול מלא ב-adsb.lol ↗</a></div>`;
+  el.classList.add('on');
+}
+document.getElementById('plist').addEventListener('click',e=>{ const c=e.target.closest('.pc'); if(c) selectPlane(c.dataset.id); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&selectedId) closeDetails(); });
 
 // ===================== CONTROLS =====================
 function startMonitor(){

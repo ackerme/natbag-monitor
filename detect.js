@@ -29,7 +29,7 @@
   // המרת רשומה גולמית (adsb.lol/airplanes.live/adsb.fi או OpenSky) ליחידות אחידות:
   // גובה במטרים, קצב אנכי במ'/ש', מהירות בקמ"ש
   function normalize(p, isAdsb) {
-    let lat, lon, alt, vrate, speed, cs, id, og, track = null;
+    let lat, lon, alt, vrate, speed, cs, id, og, track = null, type = null, reg = null, squawk = null;
     if (isAdsb) {
       og = p.alt_baro === 'ground';
       const ft = og ? 0 : (typeof p.alt_baro === 'number' ? p.alt_baro : p.alt_geom);
@@ -41,14 +41,16 @@
       cs = ((p.flight || '').replace(/[@\s]/g, '') || p.r || '').trim();
       id = p.hex || '';
       track = p.track != null ? p.track : (p.true_heading != null ? p.true_heading : null);
+      type = p.t || null; reg = p.r || null; squawk = p.squawk || null;
     } else {
-      [id, cs, , , , lon, lat, alt, og, speed, track, vrate] = p;
+      [id, cs, , , , lon, lat, alt, og, speed, track, vrate, , , squawk] = p;
+      squawk = squawk || null;
       cs = (cs || '').trim();
       speed = speed != null ? speed * 3.6 : 0;
       if (track === undefined) track = null;
     }
     if (!lat || !lon) return null;
-    return { id, cs, lat, lon, alt, vrate, speed: speed || 0, og: !!og, track };
+    return { id, cs, lat, lon, alt, vrate, speed: speed || 0, og: !!og, track, type, reg, squawk };
   }
 
   // מגמת הסטייה לפי 3 הקריאות האחרונות: 'i' משתפר, 'w' מחמיר, 's' יציב
@@ -93,7 +95,8 @@
     const eta = (!onGround && spd > 60) ? Math.round((dist / spd) * 60) : null;
 
     return {
-      icao24: n.id, callsign: n.cs, lat: n.lat, lon: n.lon, track: n.track, alt, vrate, speed: spd,
+      icao24: n.id, callsign: n.cs, type: n.type || null, reg: n.reg || null, squawk: n.squawk || null,
+      lat: n.lat, lon: n.lon, track: n.track, alt, vrate, speed: spd,
       dist, dev, onGround, isDeparting, isApproach, isFinal, isAlert, sev, trend, eta, c1, c2, c3
     };
   }
