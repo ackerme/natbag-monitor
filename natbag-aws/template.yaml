@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  natbag-proxy – שרת ביניים ל-ADS-B עבור מוניטור נתב"ג,
+  עם תקציב, התרעה במייל ומתג כיבוי אוטומטי.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: כתובת המייל לקבלת התרעות תקציב
+    AllowedPattern: ".+@.+\\..+"
+  BudgetLimitUSD:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: תקציב חודשי בדולרים. מעבר לסכום הזה שרת הביניים נכבה אוטומטית.
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: מאיפה מותר לקרוא לשרת. "*" = מכל מקום (כולל קובץ מהמחשב). אפשר לשים https://USERNAME.github.io
+
+Resources:
+  # ───────────── שרת הביניים ─────────────
+  ProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: natbag-proxy
+      CodeUri: src/proxy/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]          # זול ב-20% מ-x86
+      MemorySize: 128
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref ProxyLogGroup
+      Environment:
+        Variables:
+          SSM_PREFIX: /natbag/opensky
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/opensky/*
+
+  ProxyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/natbag-proxy
+      RetentionInDays: 3              # לוגים נמחקים אחרי 3 ימים – לא מצטברת עלות אחסון
+
+  ProxyUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ProxyFunction.Arn
+      AuthType: NONE
+      Cors:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET]
+        MaxAge: 86400
+
+  # מאוקטובר 2025 כתובת ציבורית צריכה את שתי ההרשאות האלה
+  ProxyUrlPublicInvokeUrl:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProxyFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ProxyUrlPublicInvokeFunction:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProxyFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ───────────── תקציב + מתג כיבוי ─────────────
+  BudgetAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: natbag-budget-alerts
+
+  BudgetAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref BudgetAlertTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBudgetsPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref BudgetAlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    DependsOn: BudgetAlertTopicPolicy
+    Properties:
+      Budget:
+        BudgetName: natbag-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimitUSD
+          Unit: USD
+      NotificationsWithSubscribers:
+        # 50% – רק מייל אזהרה
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        # 100% – מייל + כיבוי אוטומטי דרך SNS
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+            - SubscriptionType: SNS
+              Address: !Ref BudgetAlertTopic
+
+  KillSwitchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: natbag-killswitch
+      CodeUri: src/killswitch/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 15
+      LoggingConfig:
+        LogGroup: !Ref KillSwitchLogGroup
+      Environment:
+        Variables:
+          TARGET_FUNCTION: !Ref ProxyFunction
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:PutFunctionConcurrency
+              Resource: !GetAtt ProxyFunction.Arn
+      Events:
+        BudgetAlert:
+          Type: SNS
+          Properties:
+            Topic: !Ref BudgetAlertTopic
+
+  KillSwitchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/natbag-killswitch
+      RetentionInDays: 30
+
+Outputs:
+  ProxyUrl:
+    Description: הכתובת להדביק ב-PROXY_URL בדף (בלי / בסוף)
+    Value: !GetAtt ProxyUrl.FunctionUrl
+  HealthCheck:
+    Description: פתח בדפדפן לבדיקה
+    Value: !Sub "${ProxyUrl.FunctionUrl}health"

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מוניטור נתב"ג – ניטור גישה בזמן אמת</title>
+<meta name="description" content="מערכת לניטור מטוסים בגישה לנמל התעופה בן גוריון בזמן אמת, על בסיס נתוני ADS-B">
+<style>
+:root{
+  --bg:#050814; --bg2:#0a1024; --card:#0d1530; --line:#1c2b55;
+  --text:#e3ebff; --muted:#8fa3cc; --green:#3dff8c; --blue:#5ab0ff; --amber:#ffb640; --red:#ff5a3c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;line-height:1.6;overflow-x:hidden}
+a{color:inherit}
+
+/* ---------- HERO ---------- */
+.hero{position:relative;min-height:100vh;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:24px;
+  padding:32px max(16px,5vw);background:radial-gradient(ellipse at 30% 50%,#0c1a3a 0%,var(--bg) 70%)}
+.hero-text h1{font-size:clamp(2rem,5vw,3.4rem);line-height:1.15;font-weight:800;letter-spacing:-.5px}
+.hero-text h1 span{background:linear-gradient(90deg,var(--green),var(--blue));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero-text p{font-size:clamp(1rem,1.6vw,1.2rem);color:var(--muted);margin:18px 0 30px;max-width:520px}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:.8rem;font-weight:700;color:var(--green);
+  border:1px solid #1d5a3a;background:#07231a;padding:5px 12px;border-radius:30px;margin-bottom:18px}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.4s infinite}
+@keyframes blink{50%{opacity:.25}}
+.cta{display:inline-flex;align-items:center;gap:10px;padding:15px 30px;border-radius:12px;font-size:1.1rem;font-weight:700;
+  text-decoration:none;color:#021208;background:linear-gradient(135deg,var(--green),#27d4a0);box-shadow:0 6px 30px #3dff8c40;transition:transform .15s,box-shadow .15s}
+.cta:hover{transform:translateY(-2px);box-shadow:0 10px 40px #3dff8c66}
+.cta.secondary{background:none;color:var(--text);border:1px solid var(--line);box-shadow:none;margin-inline-start:10px}
+.cta.secondary:hover{border-color:var(--blue)}
+.stats{display:flex;gap:28px;margin-top:36px;flex-wrap:wrap}
+.stats b{display:block;font-size:1.5rem;color:var(--text)}
+.stats span{font-size:.8rem;color:var(--muted)}
+
+.scene{width:100%;max-width:640px;justify-self:center}
+.scene svg{width:100%;height:auto;display:block}
+.scroll-hint{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:.8rem;text-decoration:none;animation:bob 2s infinite}
+@keyframes bob{50%{transform:translate(-50%,6px)}}
+
+/* ---------- SECTIONS ---------- */
+section{padding:80px max(16px,5vw)}
+section:nth-of-type(even){background:var(--bg2)}
+.wrap{max-width:1100px;margin:0 auto}
+h2{font-size:clamp(1.5rem,3vw,2.1rem);margin-bottom:10px}
+.lead{color:var(--muted);max-width:700px;margin-bottom:40px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+.card .ico{font-size:1.8rem;margin-bottom:10px}
+.card h3{font-size:1.05rem;margin-bottom:6px}
+.card p{font-size:.92rem;color:var(--muted)}
+
+/* flow */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;counter-reset:s}
+.step{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 18px 18px}
+.step::before{counter-increment:s;content:counter(s);position:absolute;top:-14px;right:16px;width:28px;height:28px;border-radius:50%;
+  background:var(--blue);color:#001;font-weight:800;display:grid;place-items:center;font-size:.9rem}
+.step h3{font-size:1rem;margin:4px 0 6px}
+.step p{font-size:.88rem;color:var(--muted)}
+
+/* legend */
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:28px}
+.lg{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:.9rem}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-size:.85rem;padding:6px 12px;border-radius:20px;background:var(--card);border:1px solid var(--line);color:var(--muted);direction:ltr}
+
+.final{text-align:center}
+.final p{color:var(--muted);margin:10px auto 28px;max-width:560px}
+footer{padding:26px 16px;text-align:center;font-size:.8rem;color:#5c6f99;border-top:1px solid var(--line)}
+
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;text-align:center;padding-top:40px}
+  .hero-text p{margin-inline:auto}
+  .stats{justify-content:center}
+  .scene{order:-1;max-width:460px}
+  .flow{grid-template-columns:1fr 1fr}
+  .cta.secondary{margin:12px 0 0}
+  .scroll-hint{display:none}
+  .hero{min-height:auto;padding-bottom:56px}
+}
+@media (max-width:480px){ .flow{grid-template-columns:1fr} }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important} }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="hero-text">
+    <div class="live"><i></i> נתונים חיים · מתעדכן כל דקה</div>
+    <h1>מוניטור <span>נתב"ג</span><br>ניטור גישה בזמן אמת</h1>
+    <p>רדאר שמציג את כל המטוסים סביב נמל התעופה בן גוריון, מזהה מי בגישה לנחיתה, ומתריע כשמטוס בגישה הסופית סוטה מהכיוון לשדה.</p>
+    <a class="cta" href="monitor.html">כניסה למערכת ←</a>
+    <a class="cta secondary" href="#how">איך זה עובד?</a>
+    <div class="stats">
+      <div><b>3</b><span>מקורות נתונים</span></div>
+      <div><b>60 שנ'</b><span>רענון אוטומטי</span></div>
+      <div><b>0$</b><span>עלות חודשית</span></div>
+    </div>
+  </div>
+
+  <!-- מטוס בדפוס המתנה סביב נתב"ג -->
+  <div class="scene" aria-hidden="true">
+    <svg viewBox="0 0 600 460">
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stop-color="#113a2a"/><stop offset="1" stop-color="#050814" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#3dff8c" stop-opacity="0"/><stop offset="1" stop-color="#3dff8c" stop-opacity=".35"/>
+        </linearGradient>
+        <path id="hold" d="M170,150 H430 A80,80 0 0 1 430,310 H170 A80,80 0 0 1 170,150 Z"/>
+        <path id="hold2" d="M120,110 H480 A120,120 0 0 1 480,350 H120 A120,120 0 0 1 120,110 Z"/>
+        <path id="jet" d="M16,0 L6,-2 L-2,-13 L-6,-13 L-1,-2 L-10,-2 L-14,-7 L-17,-7 L-14,0 L-17,7 L-14,7 L-10,2 L-1,2 L-6,13 L-2,13 L6,2 Z"/>
+      </defs>
+
+      <circle cx="300" cy="230" r="220" fill="url(#glow)"/>
+      <!-- טבעות רדאר -->
+      <g fill="none" stroke="#3dff8c" stroke-opacity=".18">
+        <circle cx="300" cy="230" r="70"/><circle cx="300" cy="230" r="140"/><circle cx="300" cy="230" r="210" stroke-opacity=".35"/>
+        <line x1="90" y1="230" x2="510" y2="230"/><line x1="300" y1="20" x2="300" y2="440"/>
+      </g>
+      <!-- קרן סורקת -->
+      <path d="M300,230 L300,20 A210,210 0 0 1 405,48 Z" fill="url(#sweep)">
+        <animateTransform attributeName="transform" type="rotate" from="0 300 230" to="360 300 230" dur="5s" repeatCount="indefinite"/>
+      </path>
+
+      <!-- מסלולי ההמתנה -->
+      <use href="#hold" fill="none" stroke="#5ab0ff" stroke-opacity=".35" stroke-dasharray="6 8"/>
+      <use href="#hold2" fill="none" stroke="#ffb640" stroke-opacity=".22" stroke-dasharray="4 10"/>
+
+      <!-- נתב"ג: שני מסלולים מצטלבים -->
+      <g transform="translate(300 230)">
+        <circle r="30" fill="#0d1530" stroke="#1c2b55"/>
+        <rect x="-22" y="-3" width="44" height="6" rx="2" fill="#8fa3cc" transform="rotate(-30)"/>
+        <rect x="-18" y="-3" width="36" height="6" rx="2" fill="#8fa3cc" transform="rotate(60)"/>
+        <circle r="3" fill="#3dff8c"><animate attributeName="opacity" values="1;.2;1" dur="1.4s" repeatCount="indefinite"/></circle>
+      </g>
+      <text x="300" y="282" text-anchor="middle" font-size="13" fill="#8fa3cc" font-family="Segoe UI, Arial">נתב"ג · TLV</text>
+
+      <!-- מטוס ראשי: מסתובב בדפוס ההמתנה -->
+      <g>
+        <use href="#jet" fill="#e3ebff" stroke="#5ab0ff" stroke-width=".8" transform="scale(1.25)"/>
+        <animateMotion dur="14s" repeatCount="indefinite" rotate="auto"><mpath href="#hold"/></animateMotion>
+      </g>
+      <!-- מטוס שני: במעגל החיצוני -->
+      <g opacity=".75">
+        <use href="#jet" fill="#ffb640" transform="scale(.9)"/>
+        <animateMotion dur="22s" begin="-9s" repeatCount="indefinite" rotate="auto"><mpath href="#hold2"/></animateMotion>
+      </g>
+      <!-- נקודות מטוסים רחוקים -->
+      <g fill="#3dff8c">
+        <circle cx="140" cy="70" r="3"><animate attributeName="opacity" values=".2;1;.2" dur="5s" repeatCount="indefinite"/></circle>
+        <circle cx="505" cy="330" r="3"><animate attributeName="opacity" values=".2;1;.2" dur="5s" begin="2s" repeatCount="indefinite"/></circle>
+        <circle cx="470" cy="90" r="3"><animate attributeName="opacity" values=".2;1;.2" dur="5s" begin="1s" repeatCount="indefinite"/></circle>
+      </g>
+    </svg>
+  </div>
+  <a class="scroll-hint" href="#what">▼ גלול להסבר</a>
+</header>
+
+<!-- ================= WHAT ================= -->
+<section id="what">
+  <div class="wrap">
+    <h2>מה המערכת עושה</h2>
+    <p class="lead">כל מטוס מסחרי משדר כמה פעמים בשנייה את המיקום, הגובה, המהירות והכיוון שלו (ADS-B). המערכת אוספת את השידורים האלה מרשתות קליטה פתוחות ומנתחת אותם בזמן אמת.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">📡</div><h3>רדאר סורק</h3><p>נתב"ג במרכז. כל מטוס מוצג כנקודה במיקום ובמרחק האמיתיים שלו, ונדלק כשקרן הסריקה עוברת עליו.</p></div>
+      <div class="card"><div class="ico">🛰</div><h3>מפת לוויין</h3><p>צילום לוויין של אזור השדה עם המטוסים ועם עיגול של אזור הגישה הסופית, 25 ק"מ מהשדה.</p></div>
+      <div class="card"><div class="ico">🛬</div><h3>זיהוי שלב הטיסה</h3><p>על הקרקע, המראה, גישה או גישה סופית. הזיהוי מתבסס על שילוב של גובה, קצב ירידה ומרחק.</p></div>
+      <div class="card"><div class="ico">🚨</div><h3>התרעת סטייה</h3><p>מטוס בגישה סופית שכיוון הטיסה שלו לא מכוון לשדה, לאורך כמה קריאות רצופות.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW ================= -->
+<section id="how">
+  <div class="wrap">
+    <h2>איך זה עובד</h2>
+    <p class="lead">הדף פונה לשרת ביניים קטן ב-AWS, שאוסף את הנתונים וחוזר עם תמונת מצב מעודכנת. הכל מוגדר כקוד (Infrastructure as Code).</p>
+    <div class="flow">
+      <div class="step"><h3>שידור מהמטוס</h3><p>משדר ה-ADS-B במטוס שולח מיקום, גובה ומהירות. תחנות קליטה של מתנדבים מעבירות את השידורים לרשתות פתוחות.</p></div>
+      <div class="step"><h3>שרת ב-AWS Lambda</h3><p>פונה ל-adsb.lol, ואם הוא לא עונה עובר אוטומטית ל-airplanes.live או ל-adsb.fi. התשובה נשמרת במטמון ונדחסת.</p></div>
+      <div class="step"><h3>ניתוח בדפדפן</h3><p>המרת יחידות, זיהוי שלב הטיסה וחישוב הסטייה של כל מטוס מהכיוון לשדה.</p></div>
+      <div class="step"><h3>תצוגה והתרעה</h3><p>רדאר, מפה ורשימה מתעדכנים כל דקה, ובמקרה של סטייה מתמשכת קופצת התרעה.</p></div>
+    </div>
+
+    <div class="legend">
+      <div class="lg"><span class="dot" style="background:#50ff8c"></span>ירוק: מטוס רגיל</div>
+      <div class="lg"><span class="dot" style="background:#50d2ff"></span>תכלת: בגישה סופית</div>
+      <div class="lg"><span class="dot" style="background:#8ca0aa"></span>אפור: על הקרקע</div>
+      <div class="lg"><span class="dot" style="background:#ff4628"></span>אדום: התרעת סטייה</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LOGIC ================= -->
+<section id="logic">
+  <div class="wrap">
+    <h2>לוגיקת הזיהוי</h2>
+    <p class="lead">המערכת לא מסתמכת על נתון בודד. היא משלבת כמה תנאים כדי לצמצם התרעות שווא.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🅿</div><h3>סינון קרקע</h3><p>מטוס שמדווח "על הקרקע", או שנע מתחת ל-80 קמ"ש בגובה נמוך, לא נכנס לחישוב.</p></div>
+      <div class="card"><div class="ico">🛫</div><h3>זיהוי המראה</h3><p>מטוס שמטפס ביותר מ-2 מ'/ש' מסומן כהמראה, גם אם הוא קרוב ונמוך.</p></div>
+      <div class="card"><div class="ico">✅</div><h3>2 מתוך 3</h3><p>גישה מזוהה כשמתקיימים שניים מתוך שלושה תנאים: קרוב לשדה, מתחת ל-4,000 מ', בירידה.</p></div>
+      <div class="card"><div class="ico">🎯</div><h3>סטייה ומגמה</h3><p>בגישה הסופית מושווים כיוון הטיסה והכיוון לשדה. התרעה קופצת רק אחרי 3 קריאות רצופות, ולא כשהמטוס כבר מתקן את הכיוון.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TECH ================= -->
+<section id="tech">
+  <div class="wrap">
+    <h2>טכנולוגיות</h2>
+    <p class="lead">Frontend בקובץ אחד בלי build, ו-Backend ב-AWS עם תקציב ומתג כיבוי אוטומטי.</p>
+    <div class="chips">
+      <span class="chip">JavaScript</span><span class="chip">HTML5 Canvas</span><span class="chip">Leaflet</span>
+      <span class="chip">AWS Lambda</span><span class="chip">AWS SAM</span><span class="chip">CloudFormation</span>
+      <span class="chip">SSM Parameter Store</span><span class="chip">AWS Budgets</span><span class="chip">SNS</span>
+      <span class="chip">CloudWatch</span><span class="chip">IAM</span><span class="chip">ADS-B</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FINAL CTA ================= -->
+<section class="final">
+  <div class="wrap">
+    <h2>מוכן לראות מה קורה עכשיו מעל נתב"ג?</h2>
+    <p>המערכת מתחילה לפעול מיד ומציגה את המטוסים שנמצאים באוויר ברגע זה.</p>
+    <a class="cta" href="monitor.html">כניסה למערכת ←</a>
+  </div>
+</section>
+
+<footer>
+  נתוני טיסות: adsb.lol · airplanes.live · adsb.fi · OpenSky Network &nbsp;|&nbsp; פרויקט אישי ללמידה, לא לשימוש מבצעי או בטיחותי
+</footer>
+</body>
+</html>

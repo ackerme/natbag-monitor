@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מוניטור נתב"ג</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#06070f;color:#e0e8ff;font-family:'Segoe UI',Arial,sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+header{background:linear-gradient(135deg,#12003a,#0d1a4a);padding:7px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #1a2a6a;flex-shrink:0;flex-wrap:wrap}
+header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
+#dot{width:10px;height:10px;border-radius:50%;background:#333;flex-shrink:0}
+#dot.ok{background:#00e676;box-shadow:0 0 8px #00e676}
+#dot.err{background:#ff1744;box-shadow:0 0 8px #ff1744}
+#lastUp{font-size:.7rem;color:#4a6a9a;margin-right:auto}
+.cr{display:flex;align-items:center;gap:8px}
+.cr label{font-size:.75rem;color:#7a9acc}
+.cr input{width:58px;background:#0d1a3a;border:1px solid #2a4a8a;color:#c0d8ff;border-radius:5px;padding:3px 5px;font-size:.78rem}
+#btnT{padding:5px 14px;border:none;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:700;background:linear-gradient(135deg,#1a5aff,#5500cc);color:#fff}
+#btnD{padding:5px 12px;border:1px solid #aa8800;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:700;background:#221a00;color:#ffcc44}
+#btnD.on{background:#aa8800;color:#000}
+#diag{font-size:.72rem;padding:4px 14px;background:#0a0d20;border-bottom:1px solid #1a2a5a;color:#8aa0cc;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#diag .okc{color:#44ee88}#diag .bad{color:#ff7766}
+#btnT.stop{background:linear-gradient(135deg,#ff4400,#cc0033)}
+
+.main{display:flex;flex:1;overflow:hidden}
+
+/* LEFT */
+#lp{width:240px;background:#07091a;border-left:1px solid #1a2a5a;display:flex;flex-direction:column;flex-shrink:0}
+#lp h2{font-size:.78rem;padding:7px 10px;background:#0b1028;color:#5080bb;border-bottom:1px solid #1a2a5a}
+#plist{flex:1;overflow-y:auto;padding:3px}
+#plist::-webkit-scrollbar{width:3px}
+#plist::-webkit-scrollbar-thumb{background:#2a4a8a}
+.pc{background:#0c1330;border:1px solid #1c2e58;border-radius:7px;margin-bottom:4px;padding:7px 9px;cursor:pointer;transition:border-color .2s}
+.pc:hover{border-color:#4a7aff}
+.pc.al{border-color:#ff4400;background:#180800}
+.pc .cs{font-size:.82rem;font-weight:700;color:#7ac8ff}
+.pc .mt{font-size:.7rem;color:#4a70aa;margin-top:2px}
+.pc .dv{font-size:.72rem;font-weight:600;margin-top:3px}
+.pc .dv.hi{color:#ff4400}.pc .dv.me{color:#ffaa00}.pc .dv.lo{color:#ffee00}
+.cb{display:flex;gap:4px;margin-top:4px}
+.cb span{flex:1;padding:2px 3px;border-radius:3px;font-size:.62rem;text-align:center;background:#111;color:#333}
+.cb span.m{background:#0f2800;color:#55ee22;border:1px solid #2a8800}
+
+/* CENTER */
+#cp{flex:1;position:relative;overflow:hidden;background:#010402}
+#gc{position:absolute;inset:0;width:100%;height:100%}
+
+/* RIGHT */
+#rp{width:280px;background:#07091a;border-right:1px solid #1a2a5a;display:flex;flex-direction:column;flex-shrink:0}
+#rp h2{font-size:.78rem;padding:7px 10px;background:#0b1028;color:#5080bb;border-bottom:1px solid #1a2a5a}
+#mapDiv{flex:1;position:relative}
+#leafMap{position:absolute;inset:0}
+.stats-bar{padding:7px 10px;border-top:1px solid #111a38;display:flex;gap:10px;justify-content:space-around;flex-shrink:0;background:#07091a}
+.sb{text-align:center}
+.sb .sv{font-size:1.1rem;font-weight:700;color:#80c8ff}
+.sb .sl{font-size:.65rem;color:#4a6a9a}
+
+/* ALERT */
+#ab{display:none;position:fixed;top:120px;left:50%;transform:translateX(-50%);z-index:9999;
+  background:linear-gradient(145deg,#1a0010,#080018,#000e1c);
+  border:2px solid #ff3300;border-radius:12px;padding:12px 20px;min-width:280px;text-align:center;
+  box-shadow:0 0 50px #ff220099}
+#ab h2{font-size:1.3rem;color:#ff5500;margin-bottom:6px}
+#ab .aeta{font-size:1.6rem;font-weight:900;background:linear-gradient(90deg,#ff6600,#ffcc00,#ff3300);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#ab .ainf{font-size:.82rem;color:#ffaa88;margin-top:6px;line-height:1.6}
+#ab .atr{display:inline-block;margin-top:7px;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700}
+#ab .atr.w{background:#ff2200;color:#fff}
+#ab .atr.i{background:#22aa44;color:#fff}
+#ab .atr.s{background:#aa7700;color:#fff}
+#ab button{margin-top:12px;padding:6px 18px;background:#cc2200;border:none;color:#fff;border-radius:7px;cursor:pointer}
+@keyframes sp{from{color:#ff4400}to{color:#ffee00}}
+.sn{animation:sp .5s infinite alternate}
+</style>
+</head>
+<body>
+<header>
+  <div id="dot"></div>
+  <a href="index.html" title="דף הבית" style="text-decoration:none;font-size:.8rem;color:#8aacdd;border:1px solid #2a4a8a;border-radius:6px;padding:3px 9px">🏠 דף הבית</a>
+  <h1>✈ מוניטור נתב"ג – ניטור גישה בזמן אמת</h1>
+  <div class="cr">
+    <label>רדיוס:</label><input type="number" id="ri" value="80" min="20" max="300">
+    <label>סטייה°:</label><input type="number" id="dt" value="18" min="5" max="60">
+    <label>מקור:</label>
+    <select id="srcSel" style="background:#0d1a3a;border:1px solid #2a4a8a;color:#c0d8ff;border-radius:5px;padding:3px 5px;font-size:.78rem">
+      <option value="auto">אוטומטי</option>
+      <option value="opensky">OpenSky בלבד</option>
+    </select>
+    <button id="btnT">▶ הפעל</button>
+    <button id="btnD">🧪 הדגמה</button>
+  </div>
+  <span id="lastUp">לא עודכן</span>
+  <span id="nextUp" style="font-size:.7rem;color:#6a8acc"></span>
+</header>
+
+<div id="diag">לחץ ▶ הפעל כדי להתחיל למשוך נתונים</div>
+<div class="main">
+  <div id="lp">
+    <h2>✈ מטוסים (<span id="cnt">0</span>)</h2>
+    <div id="plist"></div>
+  </div>
+
+  <div id="cp">
+    <canvas id="gc"></canvas>
+  </div>
+
+  <div id="rp">
+    <h2>🗺 מפת גישה לנתב"ג</h2>
+    <div id="mapDiv"><div id="leafMap"></div></div>
+    <div class="stats-bar">
+      <div class="sb"><div class="sv" id="s1">0</div><div class="sl">בטווח</div></div>
+      <div class="sb"><div class="sv" id="s2">0</div><div class="sl">גישה</div></div>
+      <div class="sb"><div class="sv" id="s3">0</div><div class="sl">התרעות</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="ab">
+  <div style="font-size:1.8rem"><span class="sn">🚨</span></div>
+  <h2>⚠ גישה חריגה</h2>
+  <div id="acs" style="font-size:.95rem;color:#ffcc88;margin-bottom:4px"></div>
+  <div class="aeta" id="aeta">-- דק'</div>
+  <div class="ainf" id="ainf"></div>
+  <div id="atr" class="atr s">יציב</div>
+  <br>
+  <button onclick="document.getElementById('ab').style.display='none'">✕ סגור</button>
+</div>
+
+<script>
+// ===================== CONFIG =====================
+const TLV_LAT = 32.0055, TLV_LON = 34.8854;
+const FINAL_KM  = 25;    // גישה סופית: עד 25 ק"מ מהשדה
+const FINAL_ALT = 1800;  // ומתחת ל-1,800 מטר
+
+// ════════════════════════════════════════════════
+// ← הכתובת של שרת הביניים שלך (AWS Lambda או Cloudflare Worker), למשל:
+//   "https://abc123xyz.lambda-url.us-east-1.on.aws"
+//   "https://natbag-proxy.USERNAME.workers.dev"
+const PROXY_URL = "https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/";
+
+// לא צריך למלא אם יש PROXY_URL – את מפתח OpenSky שומרים בענן (SSM / Cloudflare Secrets).
+// אל תעלה ל-GitHub קובץ שבו השורות האלה מלאות!
+const OPENSKY_CLIENT_ID     = "";
+const OPENSKY_CLIENT_SECRET = "";
+// ════════════════════════════════════════════════
+
+// ===================== LEAFLET MAP =====================
+let map=null, conePoints=[], coneAngle=15;
+const planeMarkers = {};
+if(window.L){ try{
+map = L.map('leafMap', {zoomControl:false}).setView([TLV_LAT, TLV_LON], 8);
+// צילום לוויין (Esri) + שמות מקומות מעליו, ומפת רחובות כאפשרות נוספת
+const satellite = L.layerGroup([
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution:'Imagery &copy; Esri', maxZoom:19 }),
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+    attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19, opacity:0.9 })
+]);
+const streets = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19 });
+satellite.addTo(map);
+L.control.layers({'🛰 לוויין':satellite, '🗺 רחובות':streets}, null, {position:'topleft', collapsed:false}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+
+// TLV marker
+L.circleMarker([TLV_LAT, TLV_LON], {radius:8,color:'#00aaff',fillColor:'#00aaff',fillOpacity:0.9}).addTo(map)
+ .bindTooltip('נתב"ג TLV', {permanent:true, direction:'right', className:'tlv-tip'});
+
+// אזור הגישה הסופית
+L.circle([TLV_LAT, TLV_LON], {radius:FINAL_KM*1000,color:'#ffaa00',fillColor:'#ffaa00',fillOpacity:0.06,weight:1,dashArray:'4,6'}).addTo(map);
+
+
+}catch(e){console.warn('map init failed',e);} }
+
+function planeIcon(cs, isAlert) {
+  return L.divIcon({
+    html:`<div style="font-size:18px;transform:rotate(270deg);filter:drop-shadow(0 0 3px ${isAlert?'#ff4400':'#4488ff'})">${isAlert?'🔴':'✈'}</div>
+          <div style="font-size:9px;color:${isAlert?'#ff8844':'#88aaff'};white-space:nowrap;margin-top:-2px">${cs||''}</div>`,
+    className:'', iconAnchor:[10,10]
+  });
+}
+
+function updateMapMarkers(planes) {
+  if(!map) return;
+  const seen = new Set();
+  planes.forEach(p => {
+    if(!p.lat||!p.lon) return;
+    seen.add(p.icao24);
+    if(planeMarkers[p.icao24]) {
+      planeMarkers[p.icao24].setLatLng([p.lat,p.lon]);
+      planeMarkers[p.icao24].setIcon(planeIcon(p.callsign, p.isAlert));
+    } else {
+      planeMarkers[p.icao24] = L.marker([p.lat,p.lon], {icon:planeIcon(p.callsign, p.isAlert)})
+        .addTo(map)
+        .bindTooltip(`${p.callsign||p.icao24}<br>${p.alt?Math.round(p.alt)+'מ':''}`, {direction:'top'});
+    }
+  });
+  Object.keys(planeMarkers).forEach(id => {
+    if(!seen.has(id)) { map.removeLayer(planeMarkers[id]); delete planeMarkers[id]; }
+  });
+}
+
+// ===================== RADAR SCOPE =====================
+// מסך רדאר סורק: נתב"ג במרכז, כל מטוס מוצג במיקום האמיתי שלו (כיוון + מרחק)
+const gc = document.getElementById('gc');
+const gx = gc.getContext('2d');
+let GW,GH,GCX,GCY,GR;
+let radarPlanes=[];              // מתעדכן מ-processPlanes
+const SWEEP_SEC = 4;             // סיבוב מלא כל 4 שניות
+
+function resizeGlobe(){
+  const cp=document.getElementById('cp');
+  GW=cp.clientWidth; GH=cp.clientHeight;
+  const dpr=window.devicePixelRatio||1;
+  gc.width=GW*dpr; gc.height=GH*dpr; gx.setTransform(dpr,0,0,dpr,0,0);
+  GCX=GW/2; GCY=GH/2; GR=Math.min(GW,GH)*0.44;
+}
+
+function polar(bearingDeg, frac){         // 0° = צפון, עם כיוון השעון
+  const r=bearingDeg*Math.PI/180;
+  return [GCX+Math.sin(r)*frac*GR, GCY-Math.cos(r)*frac*GR];
+}
+
+function drawScope(){
+  const range=parseInt(document.getElementById('ri').value)||80;
+  // רקע
+  const bg=gx.createRadialGradient(GCX,GCY,0,GCX,GCY,GR*1.15);
+  bg.addColorStop(0,'#03170c'); bg.addColorStop(1,'#010603');
+  gx.fillStyle='#010402'; gx.fillRect(0,0,GW,GH);
+  gx.beginPath(); gx.arc(GCX,GCY,GR,0,Math.PI*2); gx.fillStyle=bg; gx.fill();
+
+  // טבעות מרחק
+  gx.font='11px Segoe UI, Arial'; gx.textAlign='left';
+  for(let i=1;i<=4;i++){
+    gx.beginPath(); gx.arc(GCX,GCY,GR*i/4,0,Math.PI*2);
+    gx.strokeStyle= i===4?'rgba(60,255,140,0.55)':'rgba(60,255,140,0.18)'; gx.lineWidth=i===4?1.5:1; gx.stroke();
+    gx.fillStyle='rgba(90,255,160,0.55)';
+    gx.fillText(Math.round(range*i/4)+' ק"מ', GCX+4, GCY-GR*i/4+13);
+  }
+  // אזור גישה סופית
+  if(FINAL_KM<range){
+    gx.beginPath(); gx.arc(GCX,GCY,GR*FINAL_KM/range,0,Math.PI*2);
+    gx.setLineDash([5,6]); gx.strokeStyle='rgba(255,180,40,0.5)'; gx.stroke(); gx.setLineDash([]);
+  }
+  // קווי כיוון + שנתות
+  for(let d=0; d<360; d+=10){
+    const [x1,y1]=polar(d, d%30===0?0.93:0.97), [x2,y2]=polar(d,1);
+    gx.beginPath(); gx.moveTo(x1,y1); gx.lineTo(x2,y2);
+    gx.strokeStyle='rgba(60,255,140,0.45)'; gx.lineWidth=1; gx.stroke();
+  }
+  gx.textAlign='center'; gx.textBaseline='middle'; gx.font='bold 12px Segoe UI, Arial';
+  [['N',0],['E',90],['S',180],['W',270]].forEach(([t,d])=>{
+    const [x,y]=polar(d,1.07); gx.fillStyle='rgba(120,255,180,0.8)'; gx.fillText(t,x,y);
+  });
+  gx.font='10px Segoe UI, Arial';
+  for(let d=30; d<360; d+=30){ if(d%90===0) continue;
+    const [x,y]=polar(d,1.07); gx.fillStyle='rgba(90,255,160,0.45)'; gx.fillText(d+'°',x,y); }
+  [0,90].forEach(d=>{ const [x1,y1]=polar(d,1),[x2,y2]=polar(d+180,1);
+    gx.beginPath(); gx.moveTo(x1,y1); gx.lineTo(x2,y2); gx.strokeStyle='rgba(60,255,140,0.12)'; gx.stroke(); });
+  gx.textBaseline='alphabetic';
+}
+
+function drawSweep(sweepDeg){
+  const start=(sweepDeg-90)*Math.PI/180;          // canvas: 0 = מזרח
+  if(gx.createConicGradient){
+    const cg=gx.createConicGradient(start-Math.PI*2*0.2, GCX, GCY);
+    cg.addColorStop(0,'rgba(40,255,120,0)');
+    cg.addColorStop(0.2,'rgba(40,255,120,0.38)');
+    cg.addColorStop(0.2001,'rgba(40,255,120,0)');
+    cg.addColorStop(1,'rgba(40,255,120,0)');
+    gx.beginPath(); gx.moveTo(GCX,GCY); gx.arc(GCX,GCY,GR,start-Math.PI*2*0.2,start); gx.closePath();
+    gx.fillStyle=cg; gx.fill();
+  }
+  const [x,y]=polar(sweepDeg,1);
+  gx.beginPath(); gx.moveTo(GCX,GCY); gx.lineTo(x,y);
+  gx.strokeStyle='rgba(150,255,190,0.9)'; gx.lineWidth=2; gx.shadowColor='#3f8'; gx.shadowBlur=12; gx.stroke(); gx.shadowBlur=0;
+}
+
+function drawBlips(sweepDeg){
+  const range=parseInt(document.getElementById('ri').value)||80;
+  gx.font='11px Segoe UI, Arial'; gx.textAlign='left';
+  radarPlanes.forEach(p=>{
+    if(p.dist>range) return;
+    const brg=bearingTo(TLV_LAT,TLV_LON,p.lat,p.lon);
+    const [x,y]=polar(brg, p.dist/range);
+    // כמה זמן עבר מאז שהקרן עברה על המטוס → דהייה
+    const age=(((sweepDeg-brg)%360)+360)%360/360;
+    const glow=Math.max(0.25, 1-age);
+    const col = p.isAlert?[255,70,40] : p.onGround?[140,160,170] : p.isFinal?[80,210,255] : [80,255,140];
+    const c=a=>`rgba(${col[0]},${col[1]},${col[2]},${a})`;
+    // קו כיוון טיסה
+    if(p.track!=null && !p.onGround){
+      const r=p.track*Math.PI/180;
+      gx.beginPath(); gx.moveTo(x,y); gx.lineTo(x+Math.sin(r)*16, y-Math.cos(r)*16);
+      gx.strokeStyle=c(glow*0.8); gx.lineWidth=1.5; gx.stroke();
+    }
+    gx.beginPath(); gx.arc(x,y,p.isAlert?6:p.onGround?2.5:4,0,Math.PI*2);
+    gx.fillStyle=c(glow); gx.shadowColor=c(1); gx.shadowBlur=14*glow; gx.fill(); gx.shadowBlur=0;
+    if(p.isAlert){ gx.beginPath(); gx.arc(x,y,10+Math.sin(performance.now()/150)*3,0,Math.PI*2); gx.strokeStyle=c(0.7); gx.lineWidth=1.5; gx.stroke(); }
+    if(p.onGround) return;   // על הקרקע: רק נקודה, בלי שם (כולם צפופים ליד המרכז)
+    gx.fillStyle=c(Math.max(0.45,glow));
+    gx.fillText(p.callsign||p.icao24, x+8, y-6);
+    gx.fillStyle=c(Math.max(0.3,glow*0.7));
+    gx.fillText(p.onGround?'קרקע':(p.alt!=null?Math.round(p.alt)+'מ':''), x+8, y+7);
+  });
+}
+
+function drawCenter(){
+  gx.beginPath(); gx.arc(GCX,GCY,5,0,Math.PI*2); gx.fillStyle='#9fffc8'; gx.fill();
+  gx.font='bold 11px Segoe UI, Arial'; gx.textAlign='left'; gx.fillStyle='#9fffc8';
+  gx.fillText('נתב"ג', GCX+8, GCY+14);
+}
+
+function drawScene(t){
+  const sweepDeg=((t/1000)/SWEEP_SEC*360)%360;
+  drawScope();
+  drawSweep(sweepDeg);
+  drawBlips(sweepDeg);
+  drawCenter();
+}
+
+function globeLoop(t){ requestAnimationFrame(globeLoop); drawScene(t); }
+
+// ===================== DATA =====================
+let running=false, fetchTimer=null, alertCount=0;
+let planeHistory={}, alertedIcaos={};
+
+function haversine(a,b,c,d){
+  const R=6371,r=x=>x*Math.PI/180,dL=r(d-b),dA=r(c-a);
+  const x=Math.sin(dA/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dL/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+function bearingTo(a,b,c,d){
+  const r=x=>x*Math.PI/180,dL=r(d-b);
+  return(Math.atan2(Math.sin(dL)*Math.cos(r(c)),Math.cos(r(a))*Math.sin(r(c))-Math.sin(r(a))*Math.cos(r(c))*Math.cos(dL))*180/Math.PI+360)%360;
+}
+function angDiff(a,b){let d=((a-b)+360)%360;return d>180?360-d:d;}
+function getTrend(id,dev){
+  if(!planeHistory[id]) planeHistory[id]=[];
+  planeHistory[id].push(dev); if(planeHistory[id].length>8) planeHistory[id].shift();
+  const h=planeHistory[id]; if(h.length<3) return 's';
+  const r=h.slice(-3), a1=(r[0]+r[1])/2, a2=(r[1]+r[2])/2;
+  return a2<a1-2?'i':a2>a1+2?'w':'s';
+}
+
+let osToken=null, osTokenExp=0, osTokenStatus='';
+async function getOpenSkyToken(){
+  if(!OPENSKY_CLIENT_ID||!OPENSKY_CLIENT_SECRET){ osTokenStatus='בלי מפתח – לא מילאת CLIENT_ID/SECRET'; return null; }
+  if(osToken&&Date.now()<osTokenExp) return osToken;
+  try{
+    const r=await fetch('https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({grant_type:'client_credentials',client_id:OPENSKY_CLIENT_ID,client_secret:OPENSKY_CLIENT_SECRET}),
+      signal:AbortSignal.timeout(9000)
+    });
+    if(!r.ok){ osTokenStatus='המפתח נדחה (HTTP '+r.status+') – בדוק את הפרטים'; return null; }
+    const j=await r.json();
+    osTokenStatus='מחובר עם המפתח שלך ✔';
+    osToken=j.access_token; osTokenExp=Date.now()+((j.expires_in||1800)-60)*1000;
+    return osToken;
+  }catch(e){ osTokenStatus='שרת ההתחברות חסם את הבקשה (CORS)'; return null; }
+}
+
+// כל המקורות שהדף מנסה, לפי הסדר. הראשון שמצליח – נלקח.
+function buildSources(radius){
+  const nm=Math.round(radius/1.852);           // ק"מ → מייל ימי
+  const lol=`https://api.adsb.lol/v2/lat/${TLV_LAT}/lon/${TLV_LON}/dist/${nm}`;
+  const fi =`https://opendata.adsb.fi/api/v2/lat/${TLV_LAT}/lon/${TLV_LON}/dist/${nm}`;
+  const apl=`https://api.airplanes.live/v2/point/${TLV_LAT}/${TLV_LON}/${nm}`;
+  const ao =u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`;
+  const ct =u=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`;
+  return [
+    {name:'adsb.lol',              url:lol},
+    {name:'adsb.fi',               url:fi},
+    {name:'airplanes.live',        url:apl},
+    {name:'adsb.lol (allorigins)', url:ao(lol)},
+    {name:'adsb.fi (allorigins)',  url:ao(fi)},
+    {name:'adsb.lol (codetabs)',   url:ct(lol)},
+  ];
+}
+
+function setDiag(html){ document.getElementById('diag').innerHTML=html; }
+
+async function tryFetch(url,opts={},ms=8000){
+  try{
+    const r=await fetch(url,{...opts,signal:AbortSignal.timeout(ms)});
+    if(!r.ok) return {err:'HTTP '+r.status};
+    const j=await r.json();
+    return {data:j};
+  }catch(e){
+    return {err: e.name==='TimeoutError'?'זמן תגובה':'נחסם (CORS/רשת)'};
+  }
+}
+
+const REFRESH_SEC = 60;   // ← כל כמה שניות לעדכן
+let fetchGen=0, nextAt=0, lastGoodTime=null;
+function scheduleNext(gen){
+  clearTimeout(fetchTimer);
+  nextAt=Date.now()+REFRESH_SEC*1000;
+  fetchTimer=setTimeout(()=>{ if(gen===fetchGen) doFetch(); }, REFRESH_SEC*1000);
+}
+setInterval(()=>{
+  const el=document.getElementById('nextUp');
+  if(!running||demoMode||!nextAt){ el.textContent=''; return; }
+  const left=Math.max(0,Math.round((nextAt-Date.now())/1000));
+  el.textContent = left>0 ? `עדכון הבא בעוד ${left} שנ'` : 'מעדכן…';
+},1000);
+
+async function doFetch(){
+  if(!running||demoMode) return;
+  const gen=fetchGen; nextAt=0;
+  const radius=parseInt(document.getElementById('ri').value)||80;
+  const log=[]; let raw=null, isAdsb=false, used='';
+
+  const onlyOS=document.getElementById('srcSel').value==='opensky';
+  const nm=Math.round(radius/1.852);
+  const W=PROXY_URL.replace(/\/+$/,'');
+
+  // 0. שרת הביניים שלך (אם הוגדר) – המקור הראשי
+  if(W){
+    const path=onlyOS?'opensky':'aircraft';
+    const r=await tryFetch(`${W}/${path}?lat=${TLV_LAT}&lon=${TLV_LON}&dist=${nm}`,{},12000);
+    const d=r.data;
+    if(d && Array.isArray(d.ac)){ raw=d; isAdsb=true; used='השרת שלך ← '+(d._source||'ADS-B'); }
+    else if(d && d.states!==undefined){ raw=d; isAdsb=false; used='השרת שלך ← '+(d._source||'OpenSky'); }
+    if(raw) log.push(`<b class="okc">✔ ${used}</b>`);
+    else log.push(`<span class="bad">✖ השרת שלך: ${r.err||(d&&d.error)||'תשובה לא תקינה'}</span>`);
+  }
+
+  for(const src of ((raw||onlyOS)?[]:buildSources(radius))){
+    const r=await tryFetch(src.url,{},src.url.includes('allorigins')||src.url.includes('codetabs')?15000:6000);
+    if(r.data && Array.isArray(r.data.ac)){ raw=r.data; isAdsb=true; used=src.name; log.push(`<b class="okc">✔ ${src.name}</b>`); break; }
+    log.push(`<span class="bad">✖ ${src.name}: ${r.err||'תשובה לא תקינה'}</span>`);
+  }
+
+  if(!raw && !(W && onlyOS)){
+    const deg=radius/111;
+    const su=`https://opensky-network.org/api/states/all?lamin=${TLV_LAT-deg}&lamax=${TLV_LAT+deg}&lomin=${TLV_LON-deg}&lomax=${TLV_LON+deg}`;
+    const tok=await getOpenSkyToken();
+    const r=await tryFetch(su, tok?{headers:{Authorization:'Bearer '+tok}}:{});
+    if(r.data && r.data.states!==undefined){ raw=r.data; isAdsb=false; used='OpenSky'; log.push(`<b class="okc">✔ OpenSky</b> (${osTokenStatus})`); }
+    else log.push(`<span class="bad">✖ OpenSky: ${r.err||'תשובה לא תקינה'} · מפתח: ${osTokenStatus}</span>`);
+  }
+
+  const dot=document.getElementById('dot');
+  if(!raw){
+    dot.className='err';
+    const stale = lastGoodTime ? `<b style="color:#ffcc44">מוצגים נתונים מהעדכון האחרון שהצליח (${lastGoodTime}). ננסה שוב בעוד דקה.</b> ` : '';
+    setDiag('⚠ אף מקור נתונים לא ענה. '+stale+log.join(' · '));
+    if(gen===fetchGen) scheduleNext(gen); return;
+  }
+  dot.className='ok';
+  lastGoodTime=new Date().toLocaleTimeString('he-IL');
+  document.getElementById('lastUp').textContent='עודכן: '+lastGoodTime;
+  const arr=isAdsb?(raw.ac||[]):(raw.states||[]);
+  setDiag(`מקור נתונים: <b class="okc">${used}</b> · התקבלו ${arr.length} מטוסים · ${log.join(' · ')}`);
+  processPlanes(arr,isAdsb,radius);
+  if(gen===fetchGen) scheduleNext(gen);
+}
+
+// ===================== DEMO MODE =====================
+// נתונים מדומים בלבד – כדי לבדוק שהתצוגה עובדת גם בלי אינטרנט
+let demoMode=false, demoTimer=null, demoPlanes=[];
+function initDemo(){
+  const names=['ELY001','THY794','UAE931','RYR4521','WZZ2231','ISR722','AIZ123','DLH686','BAW165','AFR1620'];
+  demoPlanes=names.map((cs,i)=>{
+    const ang=(i/names.length)*360, d=15+Math.random()*60;
+    const r=ang*Math.PI/180;
+    return {hex:'demo'+i, flight:cs,
+      lat:TLV_LAT+Math.cos(r)*d/111, lon:TLV_LON+Math.sin(r)*d/111/0.85,
+      alt_baro:2000+Math.random()*12000, baro_rate:-(Math.random()*1500), gs:180+Math.random()*250};
+  });
+}
+function demoTick(){
+  demoPlanes.forEach(p=>{
+    const b=bearingTo(p.lat,p.lon,TLV_LAT,TLV_LON)*Math.PI/180;
+    p.lat+=Math.cos(b)*0.012; p.lon+=Math.sin(b)*0.012;
+    p.alt_baro=Math.max(300,p.alt_baro-150);
+    p.track=(bearingTo(p.lat,p.lon,TLV_LAT,TLV_LON)+(p.hex==='demo3'?65:(Math.random()*10-5))+360)%360;  // demo3 = מטוס שסוטה, להדגמת התרעה
+    if(haversine(p.lat,p.lon,TLV_LAT,TLV_LON)<3){ const r=Math.random()*Math.PI*2; p.lat=TLV_LAT+Math.cos(r)*0.7; p.lon=TLV_LON+Math.sin(r)*0.8; p.alt_baro=12000; }
+  });
+  document.getElementById('dot').className='ok';
+  document.getElementById('lastUp').textContent='הדגמה: '+new Date().toLocaleTimeString('he-IL');
+  setDiag('<b style="color:#ffcc44">🧪 מצב הדגמה – נתונים מדומים, לא מטוסים אמיתיים</b>');
+  processPlanes(demoPlanes,true,parseInt(document.getElementById('ri').value)||80);
+}
+
+function processPlanes(arr,isAdsb,radius){
+  const devThresh=parseInt(document.getElementById('dt').value)||18;
+  let planes=[];
+
+  arr.forEach(p=>{
+    let lat,lon,alt,vrate,speed,cs,id,og,track=null;
+    if(isAdsb){
+      // adsb: גובה ברגל, קצב אנכי ברגל/דקה, מהירות בקשרים → ממירים למטר, מ'/ש', קמ"ש
+      og=p.alt_baro==='ground';
+      const ft=og?0:(typeof p.alt_baro==='number'?p.alt_baro:p.alt_geom);
+      lat=p.lat;lon=p.lon;
+      alt=ft!=null?ft*0.3048:null;
+      const vr=p.baro_rate!=null?p.baro_rate:p.geom_rate;
+      vrate=vr!=null?vr*0.00508:null;
+      speed=p.gs!=null?p.gs*1.852:0;
+      cs=((p.flight||'').replace(/[@\s]/g,'')||p.r||'').trim(); id=p.hex||'';
+      track=p.track!=null?p.track:p.true_heading;
+    } else {
+      // OpenSky: גובה במטר, מהירות במ'/ש'
+      [id,cs,,,,lon,lat,alt,og,speed,track,vrate]=p;
+      cs=(cs||'').trim(); speed=speed!=null?speed*3.6:0;
+    }
+    if(!lat||!lon) return;
+    const dist=haversine(lat,lon,TLV_LAT,TLV_LON);
+    if(dist>radius*1.1) return;
+    const spd=speed||0;
+    // על הקרקע / מסיע: לא משתתף בלוגיקת הגישה
+    const onGround = og || (spd<80 && (alt==null || alt<150));
+    const bearing=bearingTo(lat,lon,TLV_LAT,TLV_LON);
+    // סטייה = הפרש בין כיוון הטיסה של המטוס לבין הכיוון אל נתב"ג
+    const dev = track!=null ? angDiff(track,bearing) : null;
+    const c1=dist<=radius, c2=alt!=null&&alt<=4000, c3=vrate!=null&&vrate<=-1;
+    const isDeparting = !onGround && vrate!=null && vrate>2;   // מטפס יותר מ-2 מ'/ש' = המראה
+    const isApproach=!onGround && !isDeparting && [c1,c2,c3].filter(Boolean).length>=2;
+    // גישה סופית: קרוב ונמוך – כאן המטוס כבר אמור להיות מיושר לכיוון השדה
+    const isFinal = isApproach && dist<=FINAL_KM && alt!=null && alt<=FINAL_ALT && (vrate==null||vrate<0);
+    const trend=(isFinal&&dev!=null)?getTrend(id,dev):'s';
+    const enoughHistory=(planeHistory[id]||[]).length>=3;   // לפחות 3 קריאות רצופות (~1.5 דק') לפני התרעה
+    const isAlert=isFinal && dev!=null && dev>devThresh && enoughHistory && trend!=='i';
+    const sev=dev==null?'lo':dev>devThresh*2?'hi':dev>devThresh*1.4?'me':'lo';
+    const eta=(!onGround&&spd>60)?Math.round((dist/spd)*60):null;
+    planes.push({icao24:id,callsign:cs,lat,lon,track,alt,vrate,speed:spd,dist,dev,onGround,isDeparting,isApproach,isFinal,isAlert,sev,trend,eta,c1,c2,c3});
+  });
+
+  planes.sort((a,b)=>a.dist-b.dist);
+  radarPlanes=planes;
+
+  // Alert
+  planes.filter(p=>p.isAlert).forEach(p=>{
+    const now=Date.now();
+    if(!alertedIcaos[p.icao24]||now-alertedIcaos[p.icao24]>120000){
+      alertedIcaos[p.icao24]=now; alertCount++;
+      document.getElementById('s3').textContent=alertCount;
+      showAlert(p);
+    }
+  });
+
+  document.getElementById('cnt').textContent=planes.length;
+  document.getElementById('s1').textContent=planes.length;
+  document.getElementById('s2').textContent=planes.filter(p=>p.isApproach).length;
+
+  renderList(planes);
+  updateMapMarkers(planes);
+}
+
+let alertHide=null;
+function showAlert(p){
+  document.getElementById('ab').style.display='block';
+  clearTimeout(alertHide); alertHide=setTimeout(()=>document.getElementById('ab').style.display='none',12000);
+  document.getElementById('acs').textContent=`✈ ${p.callsign||p.icao24}`;
+  document.getElementById('aeta').textContent=p.eta?`${p.eta} דק'`:"-- דק'";
+  document.getElementById('ainf').innerHTML=`מרחק: ${p.dist.toFixed(1)} ק"מ | סטייה: ${p.dev.toFixed(0)}° | גובה: ${p.alt?Math.round(p.alt)+'מ':'--'}`;
+  const tb=document.getElementById('atr');
+  const tl={w:'↗ מחמיר',i:'↘ משתפר',s:'→ יציב'};
+  tb.textContent=tl[p.trend]||'יציב'; tb.className='atr '+(p.trend==='w'?'w':p.trend==='i'?'i':'s');
+}
+
+function renderList(planes){
+  document.getElementById('plist').innerHTML=planes.slice(0,25).map(p=>`
+    <div class="pc${p.isAlert?' al':''}">
+      <div class="cs">✈ ${p.callsign||p.icao24}</div>
+      <div class="mt">${p.dist.toFixed(1)} ק"מ | ${p.alt?Math.round(p.alt)+'מ':'--'} | ${p.speed?Math.round(p.speed)+' קמ"ש':'--'}</div>
+      ${p.onGround?`<div class="dv" style="color:#7a8aaa">🅿 על הקרקע</div>`:''}
+      ${p.isDeparting?`<div class="dv" style="color:#c9a0ff">🛫 המראה</div>`:''}
+      ${p.isFinal?`<div class="dv" style="color:#66ccff">🛬 גישה סופית</div>`:''}
+      ${p.isApproach?`<div class="dv ${p.isAlert?p.sev:''}" style="${p.isAlert?'':'color:#8ab'}">סטייה מכיוון נתב"ג: ${p.dev!=null?p.dev.toFixed(0)+'°':'--'} ${p.isFinal?{w:'↗',i:'↘',s:'→'}[p.trend]:''}</div>
+      <div class="cb"><span class="${p.c1?'m':''}">📍מרחק</span><span class="${p.c2?'m':''}">📏גובה</span><span class="${p.c3?'m':''}">⬇ירידה</span></div>`:''}
+    </div>`).join('');
+}
+
+// ===================== CONTROLS =====================
+function startMonitor(){
+  running=true; fetchGen++;
+  const b=document.getElementById('btnT'); b.textContent='⏹ עצור'; b.className='stop';
+  doFetch();
+}
+function stopMonitor(){
+  running=false; fetchGen++; clearTimeout(fetchTimer); nextAt=0;
+  const b=document.getElementById('btnT'); b.textContent='▶ הפעל'; b.className='';
+  document.getElementById('dot').className='';
+  setDiag('⏸ הניטור נעצר – לחץ ▶ הפעל כדי להמשיך');
+}
+document.getElementById('btnT').addEventListener('click',()=> running?stopMonitor():startMonitor());
+
+document.getElementById('btnD').addEventListener('click',()=>{
+  demoMode=!demoMode;
+  const b=document.getElementById('btnD');
+  if(demoMode){ b.classList.add('on'); b.textContent='🧪 יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; initDemo(); demoTick(); demoTimer=setInterval(demoTick,3000); }
+  else{ b.classList.remove('on'); b.textContent='🧪 הדגמה'; clearInterval(demoTimer); demoPlanes=[]; processPlanes([],true,80); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
+});
+
+// ===================== INIT =====================
+window.addEventListener('resize',()=>{ resizeGlobe(); setTimeout(()=>map&&map.invalidateSize(),100); });
+window.addEventListener('load',()=>{
+  setTimeout(()=>{ resizeGlobe(); if(map){ map.invalidateSize(); map.setView([TLV_LAT,TLV_LON],10); } requestAnimationFrame(globeLoop); startMonitor(); },100);
+});
+</script>
+</body>
+</html>
