@@ -75,6 +75,27 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 #airAlert .aa-act{display:flex;flex-direction:column;gap:6px}
 #airAlert button{background:#0006;border:1px solid #ffffff30;color:inherit;border-radius:8px;min-width:32px;height:30px;cursor:pointer;font-size:.8rem;padding:0 8px}
 #airAlert.normal #aaMore,#airAlert.normal #aaMute{display:none}
+#tkst{position:absolute;top:50px;right:10px;z-index:5;max-width:min(380px,calc(100% - 20px));font-size:.78rem}
+#tkst>button{border-radius:18px;padding:5px 12px;border:1px solid #6a3a8a;cursor:pointer;font-weight:700;font-size:.78rem;background:#1a0f2a;color:#d9b3ff}
+#tkst.multi>button{background:#2d0f45;color:#f0d6ff;border-color:#b060ff;animation:airpulse 1.4s infinite}
+#tkstBody{display:none;margin-top:6px;background:#0a1024f2;border:1px solid #3a2a5a;border-radius:10px;padding:10px 12px;color:#dccdf5;line-height:1.5}
+#tkst.open #tkstBody{display:block}
+#tkstBody .note{font-size:.68rem;color:#9a8abb;border-top:1px solid #3a2a5a;padding-top:6px;margin-top:6px}
+#tkAlert{display:none;position:fixed;top:92px;left:50%;transform:translateX(-50%);z-index:9001;width:min(560px,94vw);
+  align-items:flex-start;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid #9a4ae0;
+  background:linear-gradient(135deg,#2a0f40,#12071f);color:#f0dcff;box-shadow:0 10px 40px #000c}
+#tkAlert.on{display:flex;animation:aaIn .35s ease-out}
+#tkAlert.calm{border-color:#4a3a6a;background:#140c22;color:#cbbbe6}
+#tkAlert.calm #tkMute{display:none}
+#tkAlert .aa-ic{font-size:1.7rem;line-height:1}
+#tkAlert .aa-tx{flex:1;min-width:0;font-size:.82rem;line-height:1.5}
+#tkAlert .aa-tx b{display:block;font-size:.98rem;margin-bottom:2px}
+#tkAlert .aa-tx small{opacity:.7;font-size:.7rem}
+#tkAlert .aa-act{display:flex;flex-direction:column;gap:6px}
+#tkAlert button{background:#0006;border:1px solid #ffffff30;color:inherit;border-radius:8px;min-width:32px;height:30px;cursor:pointer}
+#airAlert.on ~ #tkAlert.on{top:auto;bottom:18px}
+.pc .kind{display:inline-block;font-size:.66rem;padding:0 7px;border-radius:9px;background:#1b2544;color:#9fb0d6;margin-top:3px}
+.pc .kind.tk{background:#2d0f45;color:#e6c8ff}
 #airstBody .ev{font-size:.72rem;color:#9fb0d6;margin-top:6px}
 #airstBody .ev span{display:inline-block;margin-inline-end:8px}
 #airstBody .nb{margin-top:6px;background:#132449;border:1px solid #2a4a8a;color:#cfe0ff;border-radius:6px;padding:3px 9px;font-size:.72rem;cursor:pointer}
@@ -200,6 +221,7 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 
   <div id="cp">
     <canvas id="gc"></canvas>
+    <div id="tkst" style="display:none"><button id="tkstBtn" type="button">⛽</button><div id="tkstBody"></div></div>
     <div id="airst" class="normal"><button id="airstBtn" type="button">✅ תנועה אווירית רגילה</button><div id="airstBody"></div></div>
   </div>
 
@@ -218,6 +240,12 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   <div class="aa-ic">📡</div>
   <div class="aa-tx"><b id="aaTitle"></b><div id="aaReasons"></div><small><span id="aaTime"></span> · התרעת תנועה אווירית, לא התרעת פיקוד העורף</small></div>
   <div class="aa-act"><button id="aaClose" title="סגור">✕</button><button id="aaMute" title="השתק צליל">🔊</button><button id="aaMore" title="פרטים">פרטים</button></div>
+</div>
+
+<div id="tkAlert" role="alert" aria-live="assertive">
+  <div class="aa-ic">⛽</div>
+  <div class="aa-tx"><b id="tkTitle"></b><div id="tkList"></div><small><span id="tkTime"></span> · לפי שידורי ADS-B פומביים · לא מעיד בהכרח על אירוע</small></div>
+  <div class="aa-act"><button id="tkClose" title="סגור">✕</button><button id="tkMute" title="השתק צליל">🔊</button></div>
 </div>
 
 <div id="det"></div>
@@ -288,7 +316,7 @@ L.circle([TLV_LAT, TLV_LON], {radius:FINAL_KM*1000,color:'#ffaa00',fillColor:'#f
 
 const mapTrails = {};
 function planeIcon(p, sel) {
-  const col = sel ? '#ffd24a' : p.isAlert ? '#ff5a3c' : p.onGround ? '#9aa6b2' : p.isHolding ? '#ffb640' : p.isTurnBack ? '#c9a0ff' : p.isFinal ? '#50d2ff' : '#e8f0ff';
+  const col = sel ? '#ffd24a' : p.isAlert ? '#ff5a3c' : p.onGround ? '#9aa6b2' : p.cls==='tanker' ? '#e07bff' : p.cls!=='passenger' ? '#8fb3cc' : p.isHolding ? '#ffb640' : p.isTurnBack ? '#c9a0ff' : p.isFinal ? '#50d2ff' : '#e8f0ff';
   const rot = (p.track ?? 90) - 90;                 // הצורה מצוירת כשהאף פונה מזרחה (90°)
   const size = p.onGround ? 16 : 26;
   const label = p.onGround ? '' : `<div style="position:absolute;top:${size-2}px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:${sel?'#ffd24a':'#fff'};text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap">${esc(p.callsign||'')}</div>`;
@@ -417,7 +445,7 @@ function drawBlips(sweepDeg){
     // כמה זמן עבר מאז שהקרן עברה על המטוס → דהייה
     const age=(((sweepDeg-brg)%360)+360)%360/360;
     const glow=Math.max(0.25, 1-age);
-    const col = p.isAlert?[255,70,40] : p.onGround?[140,160,170] : p.isHolding?[255,182,64] : p.isTurnBack?[200,150,255] : p.isFinal?[80,210,255] : [80,255,140];
+    const col = p.isAlert?[255,70,40] : p.onGround?[140,160,170] : p.cls==='tanker'?[230,120,255] : p.cls!=='passenger'?[120,165,195] : p.isHolding?[255,182,64] : p.isTurnBack?[200,150,255] : p.isFinal?[80,210,255] : [80,255,140];
     const c=a=>`rgba(${col[0]},${col[1]},${col[2]},${a})`;
     // קו כיוון טיסה
     if(p.track!=null && !p.onGround){
@@ -584,6 +612,7 @@ async function doFetch(){
   const arr=isAdsb?(raw.ac||[]):(raw.states||[]);
   setDiag(`מקור נתונים: <b class="okc">${used}</b> · התקבלו ${arr.length} מטוסים · ${log.join(' · ')}`);
   processPlanes(arr,isAdsb,radius);
+  fetchMil(W);
   if(gen===fetchGen) scheduleNext(gen);
 }
 
@@ -601,9 +630,17 @@ function initDemo(){
       // 3 מטוסים בהמתנה (מעגלים) – כדי להדגים את מדד החריגה
       hold: [4,6,8].includes(i) ? {clat:TLV_LAT+Math.cos(r)*0.3, clon:TLV_LON+Math.sin(r)*0.35, ang:0} : null};
   });
+  // מטוס קל שסוטה ומסוק – להדגים שהם לא מתריעים
+  demoPlanes.push({hex:'7395af', flight:'4XHSG', r:'4X-HSG', t:'EV97', category:'A1', lat:TLV_LAT, lon:TLV_LON+0.16, alt_baro:1350, baro_rate:-300, gs:103, light:true});
+  demoPlanes.push({hex:'738aaa', flight:'HELI1', t:'EC45', category:'A7', lat:TLV_LAT+0.15, lon:TLV_LON-0.05, alt_baro:900, baro_rate:0, gs:110, heli:true});
+  // שני מטוסי תדלוק באזור (מדומים) – להדגים את התרעת התדלוק
+  milNorm=[{hex:'ae04c5', flight:'QID21', t:'K35R', dbFlags:1, lat:33.6, lon:33.2, alt_baro:26000},
+           {hex:'738c01', flight:'DEMO707', t:'B703', dbFlags:1, lat:31.2, lon:34.3, alt_baro:24000}].map(a=>NatbagDetect.normalize(a,true));
 }
 function demoTick(){
   demoPlanes.forEach(p=>{
+    if(p.light){ p.track=(bearingTo(p.lat,p.lon,TLV_LAT,TLV_LON)+115)%360; return; }   // קל וסוטה – בלי התרעה
+    if(p.heli){ p.track=(p.track||0)+40; return; }
     if(p.hold){                                   // טס במעגל ברדיוס ~6 ק"מ
       p.hold.ang+=0.35;
       p.lat=p.hold.clat+Math.cos(p.hold.ang)*0.055; p.lon=p.hold.clon+Math.sin(p.hold.ang)*0.065;
@@ -627,8 +664,10 @@ function processPlanes(arr,isAdsb,radius){
   let planes=[];
 
   const ctx={ lat:TLV_LAT, lon:TLV_LON, radius, devThresh, finalKm:FINAL_KM, finalAlt:FINAL_ALT, history:planeHistory };
+  localNorm=[];
   arr.forEach(p=>{
     const n=NatbagDetect.normalize(p,isAdsb); if(!n) return;
+    localNorm.push(n);
     const c=NatbagDetect.classify(n,ctx);     if(c) planes.push(c);
   });
 
@@ -636,6 +675,7 @@ function processPlanes(arr,isAdsb,radius){
   radarPlanes=planes;
   recordTrails(planes);
   updateAirspace(planes);
+  updateTankers();
 
   // Alert
   planes.filter(p=>p.isAlert).forEach(p=>{
@@ -650,7 +690,7 @@ function processPlanes(arr,isAdsb,radius){
   document.getElementById('cnt').textContent=planes.length;
   document.getElementById('cnt2').textContent=planes.length;
   document.getElementById('s1').textContent=planes.length;
-  document.getElementById('s2').textContent=planes.filter(p=>p.isApproach).length;
+  document.getElementById('s2').textContent=planes.filter(p=>p.isApproach&&p.cls==='passenger').length;
 
   renderList(planes);
   updateMapMarkers(planes);
@@ -675,17 +715,19 @@ function renderList(planes){
       <div class="cs">✈ ${esc(p.callsign||p.icao24)}</div>
       ${(al||p.type)?`<div class="al-row">${logoImg(al,'')}${al?`<span>${esc(al.name)}</span>`:''}${p.type?`<span class="typ">${esc(typeName(p.type))}</span>`:''}</div>`:''}
       <div class="mt">${p.dist.toFixed(1)} ק"מ | ${p.alt?Math.round(p.alt)+'מ':'--'} | ${p.speed?Math.round(p.speed)+' קמ"ש':'--'}</div>
+      ${p.cls&&p.cls!=='passenger'?`<span class="kind${p.cls==='tanker'?' tk':''}">${KIND_LABEL[p.cls]||''}${p.cls==='tanker'&&p.country?` · ${p.country==='US'?'ארה"ב':'ישראל'}`:''}</span>`:''}
       ${p.onGround?`<div class="dv" style="color:#7a8aaa">🅿 על הקרקע</div>`:''}
       ${p.isDeparting?`<div class="dv" style="color:#c9a0ff">🛫 המראה</div>`:''}
       ${p.isFinal?`<div class="dv" style="color:#66ccff">🛬 גישה סופית</div>`:''}
       ${p.isHolding?`<div class="dv" style="color:#ffb640">🔄 בהמתנה (מעגלים)</div>`:''}
       ${p.isTurnBack?`<div class="dv" style="color:#c9a0ff">↩ הסתובב והתרחק מהשדה</div>`:''}
-      ${p.isApproach?`<div class="dv ${p.isAlert?p.sev:''}" style="${p.isAlert?'':'color:#8ab'}">סטייה מכיוון נתב"ג: ${p.dev!=null?p.dev.toFixed(0)+'°':'--'} ${p.isFinal?{w:'↗',i:'↘',s:'→'}[p.trend]:''}</div>
+      ${p.isApproach&&p.cls==='passenger'?`<div class="dv ${p.isAlert?p.sev:''}" style="${p.isAlert?'':'color:#8ab'}">סטייה מכיוון נתב"ג: ${p.dev!=null?p.dev.toFixed(0)+'°':'--'} ${p.isFinal?{w:'↗',i:'↘',s:'→'}[p.trend]:''}</div>
       <div class="cb"><span class="${p.c1?'m':''}">📍מרחק</span><span class="${p.c2?'m':''}">📏גובה</span><span class="${p.c3?'m':''}">⬇ירידה</span></div>`:''}
     </div>`; }).join('');
 }
 
 // ===================== FLIGHT DETAILS =====================
+const KIND_LABEL={tanker:'⛽ מטוס תדלוק צבאי',military:'🎖 כלי טיס צבאי',helicopter:'🚁 מסוק',light:'🛩 מטוס קל / פרטי',other:'✈ כלי טיס אחר'};
 // חברות תעופה לפי קידומת ה-callsign (ICAO) → שם + קוד IATA ללוגו
 const AIRLINES={ELY:['אל על','LY'],ISR:['ישראייר','6H'],AIZ:['ארקיע','IZ'],THY:['טורקיש','TK'],PGT:['פגסוס','PC'],
   UAE:['אמירייטס','EK'],FDB:['פליי דובאי','FZ'],ETD:['אתיחאד','EY'],RYR:['ריינאייר','FR'],WZZ:['וויז אייר','W6'],
@@ -736,7 +778,9 @@ function renderDetails(){
   const f=(v,d=0)=>v==null||isNaN(v)?'--':Number(v).toLocaleString('he-IL',{maximumFractionDigits:d});
   const st= p.squawk==='7700'?['🆘 מצב חירום (7700)','#6a1010']
           : p.squawk==='7600'?['📻 תקלת קשר (7600)','#5a3a10']
-          : p.isAlert?['🚨 התרעת סטייה','#5a1510'] : p.onGround?['🅿 על הקרקע','#1d2638']
+          : p.isAlert?['🚨 התרעת סטייה','#5a1510']
+          : (p.cls&&p.cls!=='passenger')?[KIND_LABEL[p.cls]+(p.cls==='tanker'&&p.country?(p.country==='US'?' · ארה"ב':' · ישראל'):''),p.cls==='tanker'?'#2d0f45':'#1b2544']
+          : p.onGround?['🅿 על הקרקע','#1d2638']
           : p.isDeparting?['🛫 המראה','#2a1b4a'] : p.isFinal?['🛬 גישה סופית','#0f3550']
           : p.isHolding?['🔄 בהמתנה (טס במעגלים)','#4a3508'] : p.isTurnBack?['↩ הסתובב והתרחק מהשדה','#35204a']
           : p.isApproach?['↘ בגישה לנתב"ג','#123a2a'] : ['✈ בטיסה','#132449'];
@@ -826,6 +870,71 @@ document.getElementById('aaMore').addEventListener('click',()=>{
   document.getElementById('airst').classList.add('open');
 });
 
+// ===================== TANKER ALERT (סוג התרעה שלישי) =====================
+// ריבוי מטוסי תדלוק צבאיים של ארה"ב/ישראל באזור – לפי מה שמשודר בפומבי ב-ADS-B
+let localNorm=[], milNorm=[], tankerInfo={count:0,tankers:[],multi:false}, lastTankerCount=0, tkHide=null;
+const DIRS_HE=['צפון','צפון מזרח','מזרח','דרום מזרח','דרום','דרום מערב','מערב','צפון מערב'];
+async function fetchMil(W){
+  if(!W || demoMode) return;
+  try{
+    const r=await fetch(`${W}/mil`,{signal:AbortSignal.timeout(10000)}); if(!r.ok) return;
+    const j=await r.json();
+    milNorm=(j.ac||[]).map(a=>NatbagDetect.normalize(a,true)).filter(Boolean);
+    updateTankers();
+  }catch(e){}
+}
+function updateTankers(){
+  tankerInfo=NatbagDetect.tankerStatus(milNorm.concat(localNorm),{lat:TLV_LAT,lon:TLV_LON});
+  const c=tankerInfo.count;
+  if(c>=2 && c>lastTankerCount) showTankerAlert();
+  else if(c<2 && lastTankerCount>=2) showTankerCalm();
+  lastTankerCount=c;
+  renderTankers();
+}
+function tankerLine(t){
+  const flag = t.country==='US' ? 'ארה"ב' : 'ישראל';
+  const where = t.dist!=null ? `${Math.round(t.dist)} ק"מ ${DIRS_HE[Math.round(t.brg/45)%8]} לנתב"ג` : '';
+  return `${t.name} · ${flag}${t.cs?` · ${t.cs}`:''}${where?` · ${where}`:''}${t.alt?` · ${Math.round(t.alt/100)*100} מ'`:''}`;
+}
+function tankerChime(){
+  if(airMuted||!audioCtx) return;
+  const t0=audioCtx.currentTime;
+  [880,660,440].forEach((f,i)=>{ const o=audioCtx.createOscillator(), g=audioCtx.createGain(), t=t0+i*0.28;
+    o.type='sine'; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.25,t+0.03); g.gain.exponentialRampToValueAtTime(0.0001,t+0.26);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+0.27); });
+}
+function showTankerAlert(){
+  const el=document.getElementById('tkAlert'); el.className='on';
+  document.getElementById('tkTitle').textContent=`ריבוי מטוסי תדלוק צבאיים באזור (${tankerInfo.count})`;
+  document.getElementById('tkList').innerHTML=tankerInfo.tankers.map(t=>`<div>• ${esc(tankerLine(t))}</div>`).join('');
+  document.getElementById('tkTime').textContent=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('tkMute').textContent=airMuted?'🔇':'🔊';
+  tankerChime();
+  clearTimeout(tkHide); tkHide=setTimeout(hideTankerAlert,60e3);
+  if(document.hidden && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification(document.getElementById('tkTitle').textContent,{ body:tankerInfo.tankers.map(tankerLine).join('\n'), icon:'favicon-32.png', tag:'natbag-tankers' }); }catch(e){}
+  }
+}
+function showTankerCalm(){
+  const el=document.getElementById('tkAlert'); el.className='on calm';
+  document.getElementById('tkTitle').textContent='פחות משני מטוסי תדלוק באזור';
+  document.getElementById('tkList').innerHTML='';
+  document.getElementById('tkTime').textContent=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  clearTimeout(tkHide); tkHide=setTimeout(hideTankerAlert,8e3);
+}
+function hideTankerAlert(){ document.getElementById('tkAlert').className=''; }
+function renderTankers(){
+  const box=document.getElementById('tkst'), c=tankerInfo.count;
+  box.style.display = c ? '' : 'none';
+  box.classList.toggle('multi', c>=2);
+  document.getElementById('tkstBtn').textContent = `⛽ ${c===1?'מטוס תדלוק צבאי אחד':c+' מטוסי תדלוק צבאיים'} באזור`;
+  document.getElementById('tkstBody').innerHTML = tankerInfo.tankers.map(t=>`<div>• ${esc(tankerLine(t))}</div>`).join('') +
+    `<div class="note">מטוסי תדלוק של ארה"ב וישראל שמשדרים ADS-B בפומבי, ממזרח הים התיכון ועד עיראק. מטוסים רבים טסים בלי שידור, כך שהרשימה חלקית ואינה מעידה בהכרח על אירוע.</div>`;
+}
+document.getElementById('tkClose').addEventListener('click',hideTankerAlert);
+document.getElementById('tkMute').addEventListener('click',e=>{ airMuted=!airMuted; e.currentTarget.textContent=airMuted?'🔇':'🔊'; document.getElementById('aaMute').textContent=airMuted?'🔇':'🔊'; });
+document.getElementById('tkstBtn').addEventListener('click',()=>document.getElementById('tkst').classList.toggle('open'));
+
 // ===================== AIRSPACE ANOMALY =====================
 // מדד חריגה בתנועה האווירית – לא מערכת התרעה
 const airHistory=[], approachSeen={}, lastDist={};
@@ -833,7 +942,8 @@ let airStatus=null;
 function resetAirspace(){
   airHistory.length=0;
   [approachSeen,lastDist,trails,planeHistory].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
-  airStatus=null; lastAirLevel='normal'; hideAirAlert(); document.title='מוניטור נתב"ג'; renderAirspace();
+  airStatus=null; lastAirLevel='normal'; hideAirAlert();
+  milNorm=[]; localNorm=[]; lastTankerCount=0; hideTankerAlert(); updateTankers(); document.title='מוניטור נתב"ג'; renderAirspace();
 }
 function updateAirspace(planes){
   const now=Date.now(); let holding=0, turnBacks=0, emergencies=0;
@@ -844,11 +954,13 @@ function updateAirspace(planes){
       wasApproaching: approachSeen[p.icao24] && now-approachSeen[p.icao24] <= 10*60e3,
       onGround:p.onGround, isApproach:p.isApproach, dev:p.dev, prevDist:lastDist[p.icao24], dist:p.dist });
     lastDist[p.icao24]=p.dist;
+    if(p.cls!=='passenger') return;              // המדד סופר רק מטוסי נוסעים/מסחריים
     if(p.isHolding) holding++;
     if(p.isTurnBack) turnBacks++;
     if(p.squawk==='7700'||p.squawk==='7600') emergencies++;
   });
-  airHistory.push({ t:now, airborne:planes.filter(p=>!p.onGround).length, finals:planes.filter(p=>p.isFinal).length, holding, turnBacks, emergencies });
+  const pax=planes.filter(p=>p.cls==='passenger');
+  airHistory.push({ t:now, airborne:pax.filter(p=>!p.onGround).length, finals:pax.filter(p=>p.isFinal).length, holding, turnBacks, emergencies });
   while(airHistory.length && now-airHistory[0].t > 60*60e3) airHistory.shift();
   airStatus=NatbagDetect.airspaceStatus(airHistory, now);
   onAirLevel(airStatus);

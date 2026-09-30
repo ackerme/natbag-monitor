@@ -29,7 +29,7 @@
   // המרת רשומה גולמית (adsb.lol/airplanes.live/adsb.fi או OpenSky) ליחידות אחידות:
   // גובה במטרים, קצב אנכי במ'/ש', מהירות בקמ"ש
   function normalize(p, isAdsb) {
-    let lat, lon, alt, vrate, speed, cs, id, og, track = null, type = null, reg = null, squawk = null;
+    let lat, lon, alt, vrate, speed, cs, id, og, track = null, type = null, reg = null, squawk = null, category = null, dbFlags = 0, desc = null;
     if (isAdsb) {
       og = p.alt_baro === 'ground';
       const ft = og ? 0 : (typeof p.alt_baro === 'number' ? p.alt_baro : p.alt_geom);
@@ -42,15 +42,18 @@
       id = p.hex || '';
       track = p.track != null ? p.track : (p.true_heading != null ? p.true_heading : null);
       type = p.t || null; reg = p.r || null; squawk = p.squawk || null;
+      category = p.category || null; dbFlags = p.dbFlags || 0; desc = p.desc || null;
     } else {
-      [id, cs, , , , lon, lat, alt, og, speed, track, vrate, , , squawk] = p;
+      let osCat;
+      [id, cs, , , , lon, lat, alt, og, speed, track, vrate, , , squawk, , , osCat] = p;
+      category = { 2: 'A1', 3: 'A2', 4: 'A3', 5: 'A4', 6: 'A5', 8: 'A7' }[osCat] || null;
       squawk = squawk || null;
       cs = (cs || '').trim();
       speed = speed != null ? speed * 3.6 : 0;
       if (track === undefined) track = null;
     }
     if (!lat || !lon) return null;
-    return { id, cs, lat, lon, alt, vrate, speed: speed || 0, og: !!og, track, type, reg, squawk };
+    return { id, cs, lat, lon, alt, vrate, speed: speed || 0, og: !!og, track, type, reg, squawk, category, dbFlags, desc };
   }
 
   // מגמת הסטייה לפי 3 הקריאות האחרונות: 'i' משתפר, 'w' מחמיר, 's' יציב
@@ -90,15 +93,76 @@
 
     const trend = (isFinal && dev != null) ? updateTrend(ctx.history, n.id, dev) : 's';
     const enoughHistory = (ctx.history[n.id] || []).length >= 3;          // לפחות 3 קריאות רצופות
-    const isAlert = isFinal && dev != null && dev > ctx.devThresh && enoughHistory && trend !== 'i';
+    const { cls, country } = aircraftClass(n);
+    // התרעת סטייה – רק למטוסי נוסעים/מסחריים (לא מסוקים, מטוסים קלים או צבאיים)
+    const isAlert = cls === 'passenger' && isFinal && dev != null && dev > ctx.devThresh && enoughHistory && trend !== 'i';
     const sev = dev == null ? 'lo' : dev > ctx.devThresh * 2 ? 'hi' : dev > ctx.devThresh * 1.4 ? 'me' : 'lo';
     const eta = (!onGround && spd > 60) ? Math.round((dist / spd) * 60) : null;
 
     return {
-      icao24: n.id, callsign: n.cs, type: n.type || null, reg: n.reg || null, squawk: n.squawk || null,
+      icao24: n.id, callsign: n.cs, type: n.type || null, reg: n.reg || null, squawk: n.squawk || null, cls, country,
       lat: n.lat, lon: n.lon, track: n.track, alt, vrate, speed: spd,
       dist, dev, onGround, isDeparting, isApproach, isFinal, isAlert, sev, trend, eta, c1, c2, c3
     };
+  }
+
+  // ───────────── סוג כלי הטיס ─────────────
+  // מבוסס על מה שהמטוס משדר ב-ADS-B: קטגוריה (A1 קל … A5 כבד, A7 מסוק), קוד דגם, דגל צבאי ו-callsign.
+  const AIRLINER_TYPES = new Set(('A306 A310 A318 A319 A320 A20N A321 A21N A332 A333 A338 A339 A359 A35K A388 ' +
+    'B737 B738 B739 B37M B38M B39M B3XM B752 B753 B762 B763 B764 B772 B77L B77W B778 B779 B788 B789 B78X B744 B748 ' +
+    'E170 E175 E75L E75S E190 E195 E290 E295 AT72 AT75 AT76 DH8D CRJ7 CRJ9 CRJX BCS1 BCS3 SU95 A220 A221 A223').split(' '));
+  const HELI_TYPES = new Set(('H60 S70 S76 S92 EC20 EC25 EC30 EC35 EC45 EC55 EC75 AS32 AS50 AS55 AS65 A109 A119 A139 A169 A189 ' +
+    'B06 B407 B412 B429 B505 R22 R44 R66 UH1 H47 H64 CH47 V22 NH90 AW09').split(' '));
+  // מטוסי תדלוק: KC-135 (K35R/K35E), KC-46 (K46/KC46), KC-10 (DC10 צבאי), A330 MRTT, בואינג 707 "ראם", KC-130
+  const TANKER_TYPES = new Set(['K35R', 'K35E', 'K35T', 'KC35', 'K46', 'KC46', 'KC10', 'MRTT', 'K707', 'KC30', 'KC39', 'E390']);
+  const TANKER_IF_MIL = new Set(['DC10', 'B762', 'B763', 'A332', 'B703', 'B707', 'C30J']);   // רק כשמסומן צבאי
+  const TYPE_NAMES = { K35R: 'KC-135', K35E: 'KC-135', K35T: 'KC-135', KC35: 'KC-135', K46: 'KC-46', KC46: 'KC-46', B762: 'KC-46',
+    KC10: 'KC-10', DC10: 'KC-10', MRTT: 'A330 MRTT', A332: 'A330 MRTT', B703: 'בואינג 707 "ראם"', B707: 'בואינג 707 "ראם"',
+    K707: 'בואינג 707 "ראם"', C30J: 'KC-130J', KC30: 'KC-30', KC39: 'KC-390', E390: 'KC-390' };
+
+  // מדינה לפי טווח כתובת ה-ICAO (24 ביט) שהוקצה לה
+  function countryOf(hex) {
+    const v = parseInt(String(hex || '').replace(/^~/, ''), 16);
+    if (isNaN(v)) return null;
+    if (v >= 0xA00000 && v <= 0xAFFFFF) return 'US';
+    if (v >= 0x738000 && v <= 0x73FFFF) return 'IL';
+    return null;
+  }
+  const isAirlineCallsign = cs => /^[A-Z]{3}\d[0-9A-Z]{0,4}$/.test(cs || '');
+
+  /** מחזיר { cls: 'passenger'|'tanker'|'military'|'helicopter'|'light'|'other', country: 'US'|'IL'|null } */
+  function aircraftClass(n) {
+    const t = String(n.type || '').toUpperCase();
+    const cat = String(n.category || '').toUpperCase();
+    const mil = !!(n.dbFlags & 1);
+    const desc = String(n.desc || '');
+    const country = countryOf(n.id);
+    if (TANKER_TYPES.has(t) || (mil && TANKER_IF_MIL.has(t)) || /tanker|stratotanker|pegasus|extender|mrtt|\bKC-?\d/i.test(desc))
+      return { cls: 'tanker', country };
+    if (cat === 'A7' || HELI_TYPES.has(t)) return { cls: 'helicopter', country };
+    if (mil) return { cls: 'military', country };
+    const bigCat = cat === 'A3' || cat === 'A4' || cat === 'A5';
+    if (isAirlineCallsign(n.cs) && (bigCat || AIRLINER_TYPES.has(t) || (!cat && !t))) return { cls: 'passenger', country };
+    if (AIRLINER_TYPES.has(t) && (bigCat || !cat)) return { cls: 'passenger', country };   // דגם נוסעים גם כשה-callsign משובש
+    if (cat === 'A1' || cat === 'A2' || (t && !AIRLINER_TYPES.has(t))) return { cls: 'light', country };
+    return { cls: 'other', country };
+  }
+
+  // מטוסי תדלוק צבאיים של ארה"ב/ישראל מתוך רשימה (מקומית או אזורית), בלי כפילויות
+  function tankerStatus(list, center) {
+    const seen = new Set(), tankers = [];
+    for (const n of list) {
+      if (!n || seen.has(n.id)) continue;
+      const c = aircraftClass(n);
+      if (c.cls !== 'tanker' || !(c.country === 'US' || c.country === 'IL')) continue;
+      seen.add(n.id);
+      const dist = center ? haversine(center.lat, center.lon, n.lat, n.lon) : null;
+      const brg = center ? bearingTo(center.lat, center.lon, n.lat, n.lon) : null;
+      tankers.push({ id: n.id, cs: n.cs, type: n.type, name: TYPE_NAMES[String(n.type || '').toUpperCase()] || n.type || 'מטוס תדלוק',
+                     country: c.country, lat: n.lat, lon: n.lon, alt: n.alt, dist, brg });
+    }
+    tankers.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+    return { count: tankers.length, tankers, multi: tankers.length >= 2 };
   }
 
   // ───────────── מדד חריגה בתנועה האווירית ─────────────
@@ -165,7 +229,7 @@
     return { level, score, reasons, baselineReady, collectedMin };
   }
 
-  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus };
+  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus, aircraftClass, tankerStatus, countryOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NatbagDetect = api;
 })(typeof window !== 'undefined' ? window : globalThis);
