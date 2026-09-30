@@ -1,0 +1,76 @@
+# CI/CD למוניטור נתב"ג
+#  • בכל push ו-pull request: מריץ את הבדיקות (npm test)
+#  • ב-push ל-main, אחרי שהבדיקות עברו: פורס את השרת ל-AWS עם sam deploy
+#    ומוודא שהוא עונה (smoke test)
+# החיבור ל-AWS נעשה עם OIDC – בלי מפתחות גישה שמורים ב-GitHub.
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: בדיקות
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check detect.js
+      - run: npm test
+
+  deploy:
+    name: פריסה ל-AWS
+    needs: test
+    # רק ב-push ל-main, ורק אם הוגדר תפקיד ה-OIDC (Settings → Variables)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # נדרש ל-OIDC
+      contents: read
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: התחברות ל-AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: sam deploy
+        working-directory: natbag-aws
+        run: |
+          sam deploy \
+            --stack-name natbag \
+            --region us-east-1 \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "AlertEmail=${{ secrets.ALERT_EMAIL }}" "BudgetLimitUSD=1" "AllowedOrigin=*" "IvrToken=${{ secrets.IVR_TOKEN }}"
+
+      - name: Smoke test
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name natbag \
+                --query "Stacks[0].Outputs[?OutputKey=='ProxyUrl'].OutputValue" --output text)
+          echo "Proxy: $URL"
+          curl -fsS "${URL}health"
+          curl -fsS "${URL}aircraft?lat=32.0055&lon=34.8854&dist=43" | head -c 300; echo
+          curl -sS "${URL}flight?num=1" | head -c 400; echo
