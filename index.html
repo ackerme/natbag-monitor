@@ -20,6 +20,16 @@ html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;line-height:1.6;overflow-x:hidden}
 a{color:inherit}
 
+/* ---------- NAV (משותף לכל הדפים) ---------- */
+.topnav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px max(16px,4vw);
+  background:#050814e6;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topnav .brand{font-weight:800;text-decoration:none;margin-inline-end:auto;white-space:nowrap}
+.topnav .brand span{color:var(--green)}
+.topnav a.l{text-decoration:none;font-size:.88rem;color:var(--muted);padding:6px 10px;border-radius:8px;white-space:nowrap}
+.topnav a.l:hover{color:var(--text);background:var(--card)}
+.topnav a.l.on{color:var(--text);background:var(--card);border:1px solid var(--line)}
+@media (max-width:760px){ .topnav .brand{width:100%} }
+
 /* ---------- HERO ---------- */
 .hero{position:relative;min-height:100vh;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:24px;
   padding:32px max(16px,5vw);background:radial-gradient(ellipse at 30% 50%,#0c1a3a 0%,var(--bg) 70%)}
@@ -45,7 +55,7 @@ a{color:inherit}
 @keyframes bob{50%{transform:translate(-50%,6px)}}
 
 /* ---------- SECTIONS ---------- */
-section{padding:80px max(16px,5vw)}
+section{padding:80px max(16px,5vw);scroll-margin-top:56px}
 section:nth-of-type(even){background:var(--bg2)}
 .wrap{max-width:1100px;margin:0 auto}
 h2{font-size:clamp(1.5rem,3vw,2.1rem);margin-bottom:10px}
@@ -92,6 +102,16 @@ footer{padding:26px 16px;text-align:center;font-size:.8rem;color:#5c6f99;border-
 </head>
 <body>
 
+<nav class="topnav">
+  <a class="brand" href="index.html">✈ מוניטור <span>נתב"ג</span></a>
+  <a class="l on" href="index.html">בית</a>
+  <a class="l" href="monitor.html">📡 רדאר</a>
+  <a class="l" href="stats.html">📊 סטטיסטיקות</a>
+  <a class="l" href="stats.html#status">🟢 מצב המערכת</a>
+  <a class="l" href="#phone">☎ קו טלפוני</a>
+  <a class="l" href="#how">⚙ איך זה עובד</a>
+</nav>
+
 <!-- ================= HERO ================= -->
 <header class="hero">
   <div class="hero-text">
@@ -99,7 +119,7 @@ footer{padding:26px 16px;text-align:center;font-size:.8rem;color:#5c6f99;border-
     <h1>מוניטור <span>נתב"ג</span><br>ניטור גישה בזמן אמת</h1>
     <p>רדאר שמציג את כל המטוסים סביב נמל התעופה בן גוריון, מזהה מי בגישה לנחיתה, ומתריע כשמטוס בגישה הסופית סוטה מהכיוון לשדה.</p>
     <a class="cta" href="monitor.html">כניסה למערכת ←</a>
-    <a class="cta secondary" href="#how">איך זה עובד?</a>
+    <a class="cta secondary" href="stats.html">📊 סטטיסטיקות</a>
     <div class="stats">
       <div><b>3</b><span>מקורות נתונים</span></div>
       <div><b>60 שנ'</b><span>רענון אוטומטי</span></div>
@@ -217,6 +237,19 @@ footer{padding:26px 16px;text-align:center;font-size:.8rem;color:#5c6f99;border-
   </div>
 </section>
 
+<!-- ================= PHONE ================= -->
+<section id="phone">
+  <div class="wrap">
+    <h2>☎ קו טלפוני – גם מטלפון כשר</h2>
+    <p class="lead">מתקשרים ל-<b dir="ltr">077-2292885</b> ושומעים הכול בהקראה, בלי אינטרנט ובלי מסך.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">1️⃣</div><h3>כלי הטיס סביב נתב"ג</h3><p>כל כלי הטיס שבאוויר ברדיוס 100 ק"מ, מהקרוב לרחוק: חברה, דגם, מרחק, גובה, והאם הוא בגישה לנחיתה.</p></div>
+      <div class="card"><div class="ico">2️⃣</div><h3>בירור טיסה</h3><p>מקישים מספר טיסה ושומעים סטטוס, שעה מתוכננת ומעודכנת מלוח הטיסות של רשות שדות התעופה, ואם המטוס באוויר, גם איפה הוא נמצא.</p></div>
+      <div class="card"><div class="ico">📞</div><h3>התרעה טלפונית</h3><p>כשמדד החריגה בתנועה האווירית עולה ל"משמעותית", המערכת מתקשרת ומקריאה את הסיבות. לכל היותר פעם בחצי שעה.</p></div>
+    </div>
+  </div>
+</section>
+
 <!-- ================= TECH ================= -->
 <section id="tech">
   <div class="wrap">
@@ -226,7 +259,7 @@ footer{padding:26px 16px;text-align:center;font-size:.8rem;color:#5c6f99;border-
       <span class="chip">JavaScript</span><span class="chip">HTML5 Canvas</span><span class="chip">Leaflet</span>
       <span class="chip">AWS Lambda</span><span class="chip">AWS SAM</span><span class="chip">CloudFormation</span>
       <span class="chip">SSM Parameter Store</span><span class="chip">AWS Budgets</span><span class="chip">SNS</span>
-      <span class="chip">CloudWatch</span><span class="chip">IAM</span><span class="chip">GitHub Actions</span><span class="chip">OIDC</span><span class="chip">ADS-B</span>
+      <span class="chip">CloudWatch</span><span class="chip">DynamoDB</span><span class="chip">EventBridge</span><span class="chip">IAM</span><span class="chip">GitHub Actions</span><span class="chip">OIDC</span><span class="chip">ADS-B</span><span class="chip">IVR / Webhooks</span>
     </div>
   </div>
 </section>
