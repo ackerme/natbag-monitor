@@ -22,6 +22,10 @@ flowchart LR
     P -.-> S[(SSM Parameter Store<br/>מפתח מוצפן)]
     BU[AWS Budgets<br/>$1 לחודש] -->|חריגה| SN[SNS] --> K[natbag-killswitch]
     K -->|concurrency = 0| P
+    HC[natbag-healthcheck<br/>כל 5 דק'] -->|בודק מבחוץ| U
+    P -.->|מדדי EMF| CW[CloudWatch<br/>Alarms + Dashboard]
+    HC -.-> CW
+    CW -->|תקלה / חזר לתקין| OPS[SNS → מייל]
 ```
 
 ## מה יש בפרויקט
@@ -42,7 +46,31 @@ flowchart LR
 - **SSM Parameter Store:** מפתח OpenSky נשמר מוצפן ולא מופיע בקוד.
 - **Budgets, SNS ו-Kill Switch:** כשהעלות החודשית עוברת 1$, שרת הביניים נכבה אוטומטית.
 - **CloudWatch Logs:** הלוגים נשמרים 3 ימים, כדי שלא תצטבר עלות אחסון.
+- **ניטור:** מדדים, בדיקת זמינות כל 5 דקות, 6 התרעות במייל ולוח בקרה. פירוט בהמשך.
 - **IAM:** לכל פונקציה יש רק את ההרשאות שהיא צריכה (least privilege).
+
+## ניטור (Observability)
+
+המערכת מנטרת את עצמה, כדי שאדע על תקלה לפני שמשתמש נתקל בה.
+
+- **מדדים מהקוד (Embedded Metric Format):** השרת כותב שורת JSON מיוחדת ללוג, ו-CloudWatch הופך אותה למדד. בלי קריאות API ובלי הרשאות נוספות.
+  - `SourceUsed{Source}`: איזה מקור ADS-B ענה (adsb.lol, airplanes.live או adsb.fi).
+  - `UpstreamFailure{Route}`: מקור חיצוני שנכשל (ADS-B, מטוסים צבאיים, Flightradar24 או לוח הטיסות).
+- **בדיקת זמינות חיצונית (`natbag-healthcheck`):** Lambda שרצה כל 5 דקות ובודקת מבחוץ, כמו משתמש, את `/health`, את `/aircraft` ואת האתר ב-GitHub Pages.
+- **התרעות במייל (SNS), כולל הודעה כשהמצב חוזר לתקין:**
+
+| התרעה | מתי |
+|---|---|
+| `natbag-healthcheck-failed` | בדיקת הזמינות נכשלה פעמיים ברצף |
+| `natbag-proxy-errors` | השרת זרק שגיאה |
+| `natbag-proxy-throttles` | בקשות נחסמות, למשל אחרי שמתג הכיבוי הופעל |
+| `natbag-proxy-slow` | ‏p90 של זמן התגובה מעל 4 שניות במשך 15 דקות |
+| `natbag-adsb-sources-down` | כל שלושת מקורות ה-ADS-B נפלו |
+| `natbag-board-down` | לוח הטיסות של רשות שדות התעופה לא זמין, ולכן גם הקו הטלפוני |
+
+- **לוח בקרה (CloudWatch Dashboard `natbag`):** מצב ההתרעות, בקשות ושגיאות, זמני תגובה (p50 ו-p90), תוצאות בדיקת הזמינות, איזה מקור ענה, ואילו מקורות נכשלו. בתחתית יש טבלה של השגיאות האחרונות מתוך הלוגים (Logs Insights).
+
+הכול מוגדר כקוד ב-`template.yaml` ונשאר בתוך ה-Free Tier: 6 התרעות מתוך 10, ו-9 מדדים מותאמים מתוך 10.
 
 ## קו טלפוני (IVR) לטלפונים כשרים
 
@@ -53,13 +81,13 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    D[git push] --> T[GitHub Actions<br/>npm test · 53 בדיקות]
+    D[git push] --> T[GitHub Actions<br/>npm test · 57 בדיקות]
     T -->|עבר, ב-main| O[OIDC → AWS<br/>בלי מפתחות שמורים]
     O --> S[sam deploy]
     S --> H[Smoke test<br/>/health + /aircraft]
 ```
 
-- **בדיקות** (`tests/`): 53 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
+- **בדיקות** (`tests/`): 57 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
   - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
   - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
 - **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
@@ -156,7 +184,7 @@ sam deploy --guided
 
 ## טכנולוגיות
 
-`GitHub Actions` · `OIDC` · `node:test` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
+`GitHub Actions` · `OIDC` · `node:test` · `CloudWatch Alarms / Dashboards / EMF` · `EventBridge` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
 
 ## מקורות נתונים
 
