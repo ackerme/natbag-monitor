@@ -93,9 +93,19 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 #tkAlert .aa-tx small{opacity:.7;font-size:.7rem}
 #tkAlert .aa-act{display:flex;flex-direction:column;gap:6px}
 #tkAlert button{background:#0006;border:1px solid #ffffff30;color:inherit;border-radius:8px;min-width:32px;height:30px;cursor:pointer}
-#airAlert.on ~ #tkAlert.on{top:auto;bottom:18px}
 .pc .kind{display:inline-block;font-size:.66rem;padding:0 7px;border-radius:9px;background:#1b2544;color:#9fb0d6;margin-top:3px}
 .pc .kind.tk{background:#2d0f45;color:#e6c8ff}
+.pc .kind.mt{background:#063a40;color:#9ff3ff}
+#mtAlert{display:none;position:fixed;top:92px;left:50%;transform:translateX(-50%);z-index:9002;width:min(560px,94vw);
+  align-items:flex-start;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid #22c4d8;
+  background:linear-gradient(135deg,#053a44,#041a22);color:#d8fbff;box-shadow:0 10px 40px #000c}
+#mtAlert.on{display:flex;animation:aaIn .35s ease-out}
+#mtAlert .aa-ic{font-size:1.7rem;line-height:1}
+#mtAlert .aa-tx{flex:1;min-width:0;font-size:.82rem;line-height:1.5}
+#mtAlert .aa-tx b{display:block;font-size:.98rem;margin-bottom:2px}
+#mtAlert .aa-tx small{opacity:.7;font-size:.7rem}
+#mtAlert .aa-act{display:flex;flex-direction:column;gap:6px}
+#mtAlert button{background:#0006;border:1px solid #ffffff30;color:inherit;border-radius:8px;min-width:32px;height:30px;cursor:pointer}
 #airstBody .ev{font-size:.72rem;color:#9fb0d6;margin-top:6px}
 #airstBody .ev span{display:inline-block;margin-inline-end:8px}
 #airstBody .nb{margin-top:6px;background:#132449;border:1px solid #2a4a8a;color:#cfe0ff;border-radius:6px;padding:3px 9px;font-size:.72rem;cursor:pointer}
@@ -246,6 +256,12 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
   <div class="aa-ic">⛽</div>
   <div class="aa-tx"><b id="tkTitle"></b><div id="tkList"></div><small><span id="tkTime"></span> · לפי שידורי ADS-B פומביים · לא מעיד בהכרח על אירוע</small></div>
   <div class="aa-act"><button id="tkClose" title="סגור">✕</button><button id="tkMute" title="השתק צליל">🔊</button></div>
+</div>
+
+<div id="mtAlert" role="alert" aria-live="assertive">
+  <div class="aa-ic">👁</div>
+  <div class="aa-tx"><b id="mtTitle"></b><div id="mtList"></div><small><span id="mtTime"></span> · לפי רשימת Most tracked של Flightradar24 (מקור לא רשמי, לשימוש לימודי) · לא מעיד בהכרח על אירוע</small></div>
+  <div class="aa-act"><button id="mtClose" title="סגור">✕</button><button id="mtMute" title="השתק צליל">🔊</button></div>
 </div>
 
 <div id="det"></div>
@@ -613,6 +629,7 @@ async function doFetch(){
   setDiag(`מקור נתונים: <b class="okc">${used}</b> · התקבלו ${arr.length} מטוסים · ${log.join(' · ')}`);
   processPlanes(arr,isAdsb,radius);
   fetchMil(W);
+  fetchTracked(W);
   if(gen===fetchGen) scheduleNext(gen);
 }
 
@@ -636,6 +653,9 @@ function initDemo(){
   // שני מטוסי תדלוק באזור (מדומים) – להדגים את התרעת התדלוק
   milNorm=[{hex:'ae04c5', flight:'QID21', t:'K35R', dbFlags:1, lat:33.6, lon:33.2, alt_baro:26000},
            {hex:'738c01', flight:'DEMO707', t:'B703', dbFlags:1, lat:31.2, lon:34.3, alt_baro:24000}].map(a=>NatbagDetect.normalize(a,true));
+  // טיסה מדומה עם הרבה עוקבים ב-Flightradar24 – להדגים את ההתרעה הרביעית
+  trackedRaw=[{id:'demo-mt1', flight:'LY1', callsign:'ELY001', clicks:4300, from:'JFK', fromCity:'ניו יורק', to:'TLV', toCity:'תל אביב', model:'B789'},
+              {id:'demo-mt2', flight:'BA175', callsign:'BAW175', clicks:2100, from:'LHR', to:'JFK'}];
 }
 function demoTick(){
   demoPlanes.forEach(p=>{
@@ -676,6 +696,7 @@ function processPlanes(arr,isAdsb,radius){
   recordTrails(planes);
   updateAirspace(planes);
   updateTankers();
+  updateTracked();
 
   // Alert
   planes.filter(p=>p.isAlert).forEach(p=>{
@@ -716,6 +737,7 @@ function renderList(planes){
       ${(al||p.type)?`<div class="al-row">${logoImg(al,'')}${al?`<span>${esc(al.name)}</span>`:''}${p.type?`<span class="typ">${esc(typeName(p.type))}</span>`:''}</div>`:''}
       <div class="mt">${p.dist.toFixed(1)} ק"מ | ${p.alt?Math.round(p.alt)+'מ':'--'} | ${p.speed?Math.round(p.speed)+' קמ"ש':'--'}</div>
       ${p.cls&&p.cls!=='passenger'?`<span class="kind${p.cls==='tanker'?' tk':''}">${KIND_LABEL[p.cls]||''}${p.cls==='tanker'&&p.country?` · ${p.country==='US'?'ארה"ב':'ישראל'}`:''}</span>`:''}
+      ${trackedById[p.icao24]?`<span class="kind mt">👁 ${trackedById[p.icao24].clicks.toLocaleString('he-IL')} עוקבים ב-Flightradar24</span>`:''}
       ${p.onGround?`<div class="dv" style="color:#7a8aaa">🅿 על הקרקע</div>`:''}
       ${p.isDeparting?`<div class="dv" style="color:#c9a0ff">🛫 המראה</div>`:''}
       ${p.isFinal?`<div class="dv" style="color:#66ccff">🛬 גישה סופית</div>`:''}
@@ -935,6 +957,72 @@ document.getElementById('tkClose').addEventListener('click',hideTankerAlert);
 document.getElementById('tkMute').addEventListener('click',e=>{ airMuted=!airMuted; e.currentTarget.textContent=airMuted?'🔇':'🔊'; document.getElementById('aaMute').textContent=airMuted?'🔇':'🔊'; });
 document.getElementById('tkstBtn').addEventListener('click',()=>document.getElementById('tkst').classList.toggle('open'));
 
+// ===================== MOST TRACKED (סוג התרעה רביעי) =====================
+// טיסה של נתב"ג (או מטוס באזור) שמעל 1,000 אנשים עוקבים אחריה ב-Flightradar24
+const TRACKED_MIN=1000;
+let trackedRaw=[], trackedInfo={count:0,flights:[]}, trackedById={}, mtAlerted={}, mtHide=null;
+async function fetchTracked(W){
+  if(!W || demoMode) return;
+  try{
+    const r=await fetch(`${W}/tracked`,{signal:AbortSignal.timeout(10000)}); if(!r.ok) return;
+    const j=await r.json(); trackedRaw=Array.isArray(j.flights)?j.flights:[];
+    updateTracked(); renderList(radarPlanes);
+  }catch(e){}
+}
+function updateTracked(){
+  trackedInfo=NatbagDetect.trackedStatus(trackedRaw, localNorm, {threshold:TRACKED_MIN});
+  trackedById={}; trackedInfo.flights.forEach(f=>{ if(f.planeId) trackedById[f.planeId]=f; });
+  const fresh=trackedInfo.flights.filter(f=>!mtAlerted[f.key]);
+  fresh.forEach(f=>mtAlerted[f.key]=Date.now());
+  if(fresh.length) showTrackedAlert(fresh);
+}
+function heP(prefix,name){ return name ? (/^[A-Za-z0-9]/.test(name) ? `${prefix}-${name}` : prefix+name) : ''; }
+function trackedLine(f){
+  const name=f.flight||f.callsign;
+  const route= f.dir==='A' ? `נוחתת בנתב"ג${f.fromCity||f.from?' '+heP('מ',f.fromCity||f.from):''}`
+             : f.dir==='D' ? `יוצאת מנתב"ג${f.toCity||f.to?' '+heP('ל',f.toCity||f.to):''}`
+             : [heP('מ',f.fromCity||f.from),heP('ל',f.toCity||f.to)].filter(Boolean).join(' ');
+  return `${name} · ${f.clicks.toLocaleString('he-IL')} עוקבים · ${route}${f.inArea?' · באזור עכשיו':''}`;
+}
+function trackedChime(){
+  if(airMuted||!audioCtx) return;
+  const t0=audioCtx.currentTime;
+  [523,784,523,784].forEach((f,i)=>{ const o=audioCtx.createOscillator(), g=audioCtx.createGain(), t=t0+i*0.16;
+    o.type='triangle'; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.14);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+0.15); });
+}
+function showTrackedAlert(fresh){
+  document.getElementById('mtAlert').className='on';
+  const top=fresh[0];
+  document.getElementById('mtTitle').textContent = fresh.length===1
+    ? `${top.flight||top.callsign}: מעל ${TRACKED_MIN.toLocaleString('he-IL')} אנשים עוקבים אחרי הטיסה`
+    : `${fresh.length} טיסות בנתב"ג ובאזור עם מעל ${TRACKED_MIN.toLocaleString('he-IL')} עוקבים`;
+  document.getElementById('mtList').innerHTML=fresh.map(f=>`<div>• ${esc(trackedLine(f))}</div>`).join('');
+  document.getElementById('mtTime').textContent=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('mtMute').textContent=airMuted?'🔇':'🔊';
+  trackedChime();
+  clearTimeout(mtHide); mtHide=setTimeout(hideTrackedAlert,60e3);
+  if(document.hidden && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification(document.getElementById('mtTitle').textContent,{ body:fresh.map(trackedLine).join('\n'), icon:'favicon-32.png', tag:'natbag-tracked' }); }catch(e){}
+  }
+}
+function hideTrackedAlert(){ document.getElementById('mtAlert').className=''; }
+document.getElementById('mtClose').addEventListener('click',hideTrackedAlert);
+document.getElementById('mtMute').addEventListener('click',e=>{ airMuted=!airMuted; e.currentTarget.textContent=airMuted?'🔇':'🔊'; document.getElementById('aaMute').textContent=airMuted?'🔇':'🔊'; document.getElementById('tkMute').textContent=airMuted?'🔇':'🔊'; });
+
+// כמה התרעות פתוחות יחד → מסדרים אותן אחת מתחת לשנייה, בלי חפיפה
+function layoutBanners(){
+  let y=parseFloat(getComputedStyle(document.getElementById('airAlert')).top)||92;
+  ['airAlert','tkAlert','mtAlert'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el.classList.contains('on')){ el.style.top=''; return; }
+    el.style.top=y+'px'; y+=el.offsetHeight+8;
+  });
+}
+{ const mo=new MutationObserver(layoutBanners);
+  ['airAlert','tkAlert','mtAlert'].forEach(id=>mo.observe(document.getElementById(id),{attributes:true,attributeFilter:['class'],childList:true,subtree:true}));
+  window.addEventListener('resize',layoutBanners); }
+
 // ===================== AIRSPACE ANOMALY =====================
 // מדד חריגה בתנועה האווירית – לא מערכת התרעה
 const airHistory=[], approachSeen={}, lastDist={};
@@ -943,7 +1031,8 @@ function resetAirspace(){
   airHistory.length=0;
   [approachSeen,lastDist,trails,planeHistory].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
   airStatus=null; lastAirLevel='normal'; hideAirAlert();
-  milNorm=[]; localNorm=[]; lastTankerCount=0; hideTankerAlert(); updateTankers(); document.title='מוניטור נתב"ג'; renderAirspace();
+  milNorm=[]; localNorm=[]; lastTankerCount=0; hideTankerAlert(); updateTankers();
+  trackedRaw=[]; Object.keys(mtAlerted).forEach(k=>delete mtAlerted[k]); hideTrackedAlert(); updateTracked(); document.title='מוניטור נתב"ג'; renderAirspace();
 }
 function updateAirspace(planes){
   const now=Date.now(); let holding=0, turnBacks=0, emergencies=0;

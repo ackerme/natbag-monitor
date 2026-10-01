@@ -165,6 +165,34 @@
     return { count: tankers.length, tankers, multi: tankers.length >= 2 };
   }
 
+  // ───────────── טיסות שהרבה אנשים עוקבים אחריהן (Flightradar24 "Most tracked") ─────────────
+  // tracked: [{ id, flight, callsign, clicks, from, to, fromCity, toCity, model }]
+  // local:   מטוסים מנורמלים באזור (בשביל התאמה לפי callsign)
+  // רלוונטי = מעל הסף, וגם (יוצא/נוחת בנתב"ג, או נמצא עכשיו באזור)
+  function trackedStatus(tracked, local, opts = {}) {
+    const threshold = opts.threshold ?? 1000;
+    const airport = opts.airport || 'TLV';
+    const byCs = new Map();
+    for (const n of local || []) if (n && n.cs) byCs.set(String(n.cs).trim().toUpperCase(), n);
+    const seen = new Set(), flights = [];
+    for (const f of tracked || []) {
+      if (!f || !(Number(f.clicks) >= threshold)) continue;
+      const key = f.id || f.callsign || f.flight;
+      if (!key || seen.has(key)) continue;
+      const cs = String(f.callsign || '').trim().toUpperCase();
+      const near = cs ? byCs.get(cs) : null;
+      const tlv = f.from === airport || f.to === airport;
+      if (!near && !tlv) continue;
+      seen.add(key);
+      flights.push({ key, flight: f.flight || '', callsign: cs, clicks: Number(f.clicks),
+                     from: f.from || '', to: f.to || '', fromCity: f.fromCity || '', toCity: f.toCity || '',
+                     model: f.model || '', inArea: !!near, planeId: near ? near.id : null,
+                     dir: f.to === airport ? 'A' : f.from === airport ? 'D' : '' });
+    }
+    flights.sort((a, b) => b.clicks - a.clicks);
+    return { count: flights.length, flights };
+  }
+
   // ───────────── מדד חריגה בתנועה האווירית ─────────────
   // שים לב: זה מדד לתנועה האווירית בלבד, לא מערכת התרעה.
 
@@ -229,7 +257,7 @@
     return { level, score, reasons, baselineReady, collectedMin };
   }
 
-  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus, aircraftClass, tankerStatus, countryOf };
+  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus, aircraftClass, tankerStatus, countryOf, trackedStatus };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NatbagDetect = api;
 })(typeof window !== 'undefined' ? window : globalThis);
