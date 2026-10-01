@@ -301,7 +301,18 @@ const FINAL_ALT = 1800;  // ומתחת ל-1,800 מטר
 // ← הכתובת של שרת הביניים שלך (AWS Lambda או Cloudflare Worker), למשל:
 //   "https://abc123xyz.lambda-url.us-east-1.on.aws"
 //   "https://natbag-proxy.USERNAME.workers.dev"
-const PROXY_URL = "https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/";
+const PROD_PROXY_URL = "https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/";
+// סביבת הבדיקה: אחרי הפריסה הראשונה של ענף dev מדביקים כאן את ה-ProxyUrl של natbag-staging,
+// ופותחים את הדף עם ‎?env=staging‎ בסוף הכתובת.
+const STAGING_PROXY_URL = "";
+const IS_STAGING = new URLSearchParams(location.search).get('env')==='staging' && !!STAGING_PROXY_URL;
+const PROXY_URL = IS_STAGING ? STAGING_PROXY_URL : PROD_PROXY_URL;
+if(IS_STAGING) document.addEventListener('DOMContentLoaded',()=>{
+  const b=document.createElement('div');
+  b.textContent='🧪 STAGING – סביבת בדיקה';
+  b.style.cssText='position:fixed;left:0;bottom:0;z-index:99999;background:#b8860b;color:#111;font:700 12px Segoe UI,Arial;padding:4px 10px;border-top-right-radius:8px';
+  document.body.appendChild(b); document.title='[STAGING] '+document.title;
+});
 
 // לא צריך למלא אם יש PROXY_URL – את מפתח OpenSky שומרים בענן (SSM / Cloudflare Secrets).
 // אל תעלה ל-GitHub קובץ שבו השורות האלה מלאות!

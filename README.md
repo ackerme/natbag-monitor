@@ -74,20 +74,34 @@ flowchart LR
 
 ## קו טלפוני (IVR) לטלפונים כשרים
 
-מתקשרים ל[ימות המשיח](https://www.yemot.co.il), מקישים את מספר הטיסה ושומעים את הסטטוס, את שעת הנחיתה המתוכננת והמעודכנת, ואם המטוס באוויר גם את המרחק שלו מהשדה.
+מתקשרים ל[ימות המשיח](https://www.yemot.co.il) ובוחרים בתפריט:
+- **1, בירור טיסה:** מקישים את מספר הטיסה ושומעים את הסטטוס, את שעת הנחיתה המתוכננת והמעודכנת, ואם המטוס באוויר גם את המרחק שלו מהשדה.
+- **2, כלי הטיס סביב נמל התעופה:** המערכת מקריאה את כל כלי הטיס שבאוויר ברדיוס 100 ק"מ, מהקרוב לרחוק, שלושה בכל פעם. לכל אחד היא אומרת חברה ומספר טיסה (או מסוק או מטוס קל), מרחק, כיוון, גובה, והאם הוא בירידה לנחיתה או בטיפוס.
 הנתונים מגיעים מלוח הטיסות של רשות שדות התעופה (data.gov.il) ומ-ADS-B. הקוד נמצא ב-`natbag-aws/src/proxy/flights.mjs`, וההוראות ב-[natbag-aws/README.md](natbag-aws/README.md).
 
 ## CI/CD
 
 ```mermaid
 flowchart LR
-    D[git push] --> T[GitHub Actions<br/>npm test · 57 בדיקות]
-    T -->|עבר, ב-main| O[OIDC → AWS<br/>בלי מפתחות שמורים]
-    O --> S[sam deploy]
-    S --> H[Smoke test<br/>/health + /aircraft]
+    D[git push] --> T[GitHub Actions<br/>npm test · 60 בדיקות]
+    T -->|ענף dev| SO[OIDC → AWS] --> SS[sam deploy<br/>natbag-staging] --> SH[Smoke test<br/>stage=staging]
+    T -->|ענף main| PO[OIDC → AWS] --> PS[sam deploy<br/>natbag] --> PH[Smoke test]
+    SH -.->|Pull Request dev → main| T
 ```
 
-- **בדיקות** (`tests/`): 57 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
+**שתי סביבות, מאותו קוד ומאותה תבנית:**
+
+| | staging | production |
+|---|---|---|
+| ענף | `dev` | `main` |
+| CloudFormation stack | `natbag-staging` | `natbag` |
+| מה נפרס | רק שרת הביניים (`natbag-staging-proxy`) | שרת, תקציב, מתג כיבוי, ניטור והתרעות |
+| GitHub Environment | `staging` | `production` |
+| הדף | `monitor.html?env=staging` | `monitor.html` |
+
+ההבדל נקבע בפרמטר `Stage` ב-`template.yaml` ובתנאי `IsProd`. ב-staging לא נשלחים מדדים ואין התרעות, כדי להישאר ב-Free Tier ולא לקבל מיילים על סביבת בדיקה.
+
+- **בדיקות** (`tests/`): 60 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
   - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
   - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
 - **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
