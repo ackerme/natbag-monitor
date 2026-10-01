@@ -132,6 +132,12 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 /* CENTER */
 #cp{flex:1;position:relative;overflow:hidden;background:#010402}
 #gc{position:absolute;inset:0;width:100%;height:100%}
+#splitBtn{position:absolute;left:10px;bottom:10px;z-index:5;border-radius:18px;padding:5px 12px;border:1px solid #2a6a4a;background:#06180fd9;color:#9fffc8;font-weight:700;font-size:.78rem;cursor:pointer}
+#splitBtn.on{background:#0c3a22;border-color:#3fbf7a;left:50%;bottom:auto;top:50%;transform:translate(-50%,calc(-100% - 6px));white-space:nowrap}
+#cp.split #airst{top:auto;bottom:10px;display:flex;flex-direction:column-reverse;align-items:flex-end}
+#cp.split #tkst{top:auto;bottom:48px;display:flex;flex-direction:column-reverse;align-items:flex-end}
+#cp.split #tkst[style*="none"]{display:none!important}
+#cp.split #airstBody,#cp.split #tkstBody{margin:0 0 6px}
 
 /* RIGHT */
 #rp{width:280px;background:#07091a;border-right:1px solid #1a2a5a;display:flex;flex-direction:column;flex-shrink:0}
@@ -231,6 +237,7 @@ header h1{font-size:1.05rem;font-weight:700;color:#a0cfff}
 
   <div id="cp">
     <canvas id="gc"></canvas>
+    <button id="splitBtn" type="button" title="פיצול הרדאר ל-4 מסכים לפי סוג כלי הטיס">⊞ 4 מסכים</button>
     <div id="tkst" style="display:none"><button id="tkstBtn" type="button">⛽</button><div id="tkstBody"></div></div>
     <div id="airst" class="normal"><button id="airstBtn" type="button">✅ תנועה אווירית רגילה</button><div id="airstBody"></div></div>
   </div>
@@ -370,7 +377,7 @@ function updateMapMarkers(planes) {
 // מסך רדאר סורק: נתב"ג במרכז, כל מטוס מוצג במיקום האמיתי שלו (כיוון + מרחק)
 const gc = document.getElementById('gc');
 const gx = gc.getContext('2d');
-let GW,GH,GCX,GCY,GR;
+let GW,GH,GCX,GCY,GR,PX=0,PY=0,PW=0,PH=0;
 let radarPlanes=[];              // מתעדכן מ-processPlanes
 const SWEEP_SEC = 4;             // סיבוב מלא כל 4 שניות
 
@@ -387,12 +394,11 @@ function polar(bearingDeg, frac){         // 0° = צפון, עם כיוון ה�
   return [GCX+Math.sin(r)*frac*GR, GCY-Math.cos(r)*frac*GR];
 }
 
-function drawScope(){
-  const range=parseInt(document.getElementById('ri').value)||80;
+function drawScope(range){
   // רקע
   const bg=gx.createRadialGradient(GCX,GCY,0,GCX,GCY,GR*1.15);
   bg.addColorStop(0,'#03170c'); bg.addColorStop(1,'#010603');
-  gx.fillStyle='#010402'; gx.fillRect(0,0,GW,GH);
+  gx.fillStyle='#010402'; gx.fillRect(PX,PY,PW,PH);
   gx.beginPath(); gx.arc(GCX,GCY,GR,0,Math.PI*2); gx.fillStyle=bg; gx.fill();
 
   // טבעות מרחק
@@ -401,7 +407,7 @@ function drawScope(){
     gx.beginPath(); gx.arc(GCX,GCY,GR*i/4,0,Math.PI*2);
     gx.strokeStyle= i===4?'rgba(60,255,140,0.55)':'rgba(60,255,140,0.18)'; gx.lineWidth=i===4?1.5:1; gx.stroke();
     gx.fillStyle='rgba(90,255,160,0.55)';
-    gx.fillText(Math.round(range*i/4)+' ק"מ', GCX+4, GCY-GR*i/4+13);
+    if(GR>=120 || i%2===0) gx.fillText(Math.round(range*i/4)+' ק"מ', GCX+4, GCY-GR*i/4+13);
   }
   // אזור גישה סופית
   if(FINAL_KM<range){
@@ -419,7 +425,7 @@ function drawScope(){
     const [x,y]=polar(d,1.07); gx.fillStyle='rgba(120,255,180,0.8)'; gx.fillText(t,x,y);
   });
   gx.font='10px Segoe UI, Arial';
-  for(let d=30; d<360; d+=30){ if(d%90===0) continue;
+  if(GR>=150) for(let d=30; d<360; d+=30){ if(d%90===0) continue;
     const [x,y]=polar(d,1.07); gx.fillStyle='rgba(90,255,160,0.45)'; gx.fillText(d+'°',x,y); }
   [0,90].forEach(d=>{ const [x1,y1]=polar(d,1),[x2,y2]=polar(d+180,1);
     gx.beginPath(); gx.moveTo(x1,y1); gx.lineTo(x2,y2); gx.strokeStyle='rgba(60,255,140,0.12)'; gx.stroke(); });
@@ -442,10 +448,9 @@ function drawSweep(sweepDeg){
   gx.strokeStyle='rgba(150,255,190,0.9)'; gx.lineWidth=2; gx.shadowColor='#3f8'; gx.shadowBlur=12; gx.stroke(); gx.shadowBlur=0;
 }
 
-function drawBlips(sweepDeg){
-  const range=parseInt(document.getElementById('ri').value)||80;
+function drawBlips(sweepDeg, list, range){
   gx.font='11px Segoe UI, Arial'; gx.textAlign='left';
-  radarPlanes.forEach(p=>{
+  list.forEach(p=>{
     if(p.dist>range) return;
     const brg=bearingTo(TLV_LAT,TLV_LON,p.lat,p.lon);
     const [x,y]=polar(brg, p.dist/range);
@@ -484,9 +489,14 @@ function drawBlips(sweepDeg){
 // לחיצה על הרדאר בוחרת את המטוס הקרוב ביותר
 gc.addEventListener('click',e=>{
   const r=gc.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
-  const range=parseInt(document.getElementById('ri').value)||80;
+  let range=parseInt(document.getElementById('ri').value)||80, list=radarPlanes;
+  if(splitView){
+    const pn=PANES.find(q=>q._rect && mx>=q._rect[0] && mx<q._rect[0]+q._rect[2] && my>=q._rect[1] && my<q._rect[1]+q._rect[3]);
+    if(!pn) return;
+    setPane(...pn._rect,true); range=pn._range; list=pn._list.filter(p=>!p.ext);
+  }
   let best=null, bd=22;
-  radarPlanes.forEach(p=>{ if(p.dist>range) return;
+  list.forEach(p=>{ if(p.dist>range) return;
     const [x,y]=polar(bearingTo(TLV_LAT,TLV_LON,p.lat,p.lon), p.dist/range);
     const d=Math.hypot(x-mx,y-my); if(d<bd){ bd=d; best=p; } });
   if(best) selectPlane(best.icao24);
@@ -498,13 +508,72 @@ function drawCenter(){
   gx.fillText('נתב"ג', GCX+8, GCY+14);
 }
 
+// ===== תצוגה מפוצלת: 4 מסכי רדאר, כל אחד מסונן לפי סוג כלי הטיס (תצוגה בלבד) =====
+let splitView=false;
+try{ splitView=localStorage.getItem('natbag-split')==='1'; }catch(e){}
+function tankerBlips(){
+  const byId={}; localNorm.concat(milNorm).forEach(n=>{ if(n) byId[n.id]=n; });
+  return tankerInfo.tankers.map(t=>radarPlanes.find(p=>p.icao24===t.id) ||
+    { icao24:t.id, callsign:t.cs||t.name, lat:t.lat, lon:t.lon, dist:t.dist, alt:t.alt, track:(byId[t.id]||{}).track, cls:'tanker', ext:true });
+}
+const PANES=[
+  { label:'✈ מטוסי נוסעים', short:'✈ נוסעים', empty:'אין מטוסי נוסעים בטווח',          list:()=>radarPlanes.filter(p=>p.cls==='passenger') },
+  { label:'⛽ מטוסי תדלוק צבאיים', short:'⛽ תדלוק', empty:'אין מטוסי תדלוק שמשדרים באזור',  list:tankerBlips, auto:true },
+  { label:'🛩 מטוסים קלים ומסוקים', short:'🛩 קלים ומסוקים', empty:'אין מטוסים קלים או מסוקים בטווח', list:()=>radarPlanes.filter(p=>p.cls==='light'||p.cls==='helicopter') },
+  { label:'🌐 כל כלי הטיס', short:'🌐 הכול', empty:'אין כלי טיס בטווח',               list:()=>radarPlanes },
+];
+// מטוסי תדלוק יכולים להיות רחוקים (עד עיראק) → הטווח של המסך שלהם גדל לבד
+function autoRange(list, base){
+  const far=Math.max(0,...list.map(p=>p.dist||0));
+  if(far<=base) return base;
+  for(const r of [100,150,200,300,400,600,800,1000,1200,1600,2000]) if(far*1.08<=r) return r;
+  return 2000;
+}
+function setPane(x,y,w,h,split){
+  PX=x; PY=y; PW=w; PH=h;
+  GCX=x+w/2; GCY=y+h/2+(split?9:0); GR=Math.min(w,h)*(split?0.37:0.44);
+}
+function drawPane(sweepDeg, list, range, pn){
+  drawScope(range);
+  drawSweep(sweepDeg);
+  drawBlips(sweepDeg, list, range);
+  drawCenter();
+  if(!pn) return;
+  const n=list.filter(p=>p.dist<=range).length;
+  gx.textAlign='left'; gx.textBaseline='top'; gx.font='bold 12px Segoe UI, Arial';
+  const txt=`${PW<320?pn.short:pn.label} (${n})${pn.auto&&range>(parseInt(document.getElementById('ri').value)||80)?` · ${range} ק"מ`:''}`;
+  const tw=gx.measureText(txt).width;
+  gx.fillStyle='rgba(2,14,8,.85)'; gx.fillRect(PX+6,PY+6,tw+14,22);
+  gx.strokeStyle='rgba(60,255,140,.35)'; gx.strokeRect(PX+6.5,PY+6.5,tw+13,21);
+  gx.fillStyle='#b8ffd6'; gx.fillText(txt,PX+13,PY+11);
+  if(!n){ gx.textAlign='center'; gx.textBaseline='middle'; gx.font='12px Segoe UI, Arial'; gx.fillStyle='rgba(150,220,180,.6)';
+    gx.fillText(pn.empty, GCX, GCY+GR*0.55); }
+  gx.textBaseline='alphabetic';
+}
 function drawScene(t){
   const sweepDeg=((t/1000)/SWEEP_SEC*360)%360;
-  drawScope();
-  drawSweep(sweepDeg);
-  drawBlips(sweepDeg);
-  drawCenter();
+  const base=parseInt(document.getElementById('ri').value)||80;
+  if(!splitView){ setPane(0,0,GW,GH,false); drawPane(sweepDeg, radarPlanes, base, null); return; }
+  const w=GW/2, h=GH/2, rects=[[w,0],[0,0],[w,h],[0,h]];   // מימין לשמאל: נוסעים מימין למעלה
+  PANES.forEach((pn,i)=>{
+    const [x,y]=rects[i], list=pn.list(), range=pn.auto?autoRange(list,base):base;
+    pn._rect=[x,y,w,h]; pn._range=range; pn._list=list;
+    gx.save(); gx.beginPath(); gx.rect(x,y,w,h); gx.clip();
+    setPane(x,y,w,h,true); drawPane(sweepDeg, list, range, pn);
+    gx.restore();
+  });
+  gx.strokeStyle='rgba(60,255,140,.4)'; gx.lineWidth=1.5;
+  gx.beginPath(); gx.moveTo(w,0); gx.lineTo(w,GH); gx.moveTo(0,h); gx.lineTo(GW,h); gx.stroke();
 }
+function setSplit(on){
+  splitView=on;
+  try{ localStorage.setItem('natbag-split', on?'1':'0'); }catch(e){}
+  const b=document.getElementById('splitBtn');
+  b.textContent= on ? '◯ מסך אחד' : '⊞ 4 מסכים'; b.classList.toggle('on',on);
+  document.getElementById('cp').classList.toggle('split',on);
+}
+document.getElementById('splitBtn').addEventListener('click',()=>setSplit(!splitView));
+setSplit(splitView);
 
 function globeLoop(t){ requestAnimationFrame(globeLoop); drawScene(t); }
 
