@@ -1,14 +1,15 @@
 # CI/CD למוניטור נתב"ג
 #  • בכל push ו-pull request: מריץ את הבדיקות (npm test)
-#  • ב-push ל-main, אחרי שהבדיקות עברו: פורס את השרת ל-AWS עם sam deploy
-#    ומוודא שהוא עונה (smoke test)
+#  • push לענף dev  → פריסה לסביבת הבדיקה (stack: natbag-staging) + smoke test
+#  • push לענף main → פריסה ל-production (stack: natbag) + smoke test
 # החיבור ל-AWS נעשה עם OIDC – בלי מפתחות גישה שמורים ב-GitHub.
+# זרימת עבודה: מפתחים ב-dev → בודקים ב-staging → Pull Request ל-main → production.
 
 name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
@@ -31,8 +32,63 @@ jobs:
       - run: node --check detect.js
       - run: npm test
 
+  deploy-staging:
+    name: פריסה ל-staging
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: בדיקת OIDC (מה GitHub שולח ל-AWS)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const t = await core.getIDToken('sts.amazonaws.com');
+            const p = JSON.parse(Buffer.from(t.split('.')[1], 'base64').toString());
+            core.info(`sub=${p.sub} | aud=${p.aud} | repo=${p.repository}`);
+            core.info(`role=${process.env.ROLE}`);
+        env:
+          ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+      - name: התחברות ל-AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: sam deploy (staging)
+        working-directory: natbag-aws
+        run: |
+          sam deploy \
+            --stack-name natbag-staging \
+            --region us-east-1 \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "Stage=staging" "AlertEmail=${{ secrets.ALERT_EMAIL }}" "AllowedOrigin=*" "IvrToken=${{ secrets.IVR_TOKEN }}"
+
+      - name: Smoke test (staging)
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name natbag-staging \
+                --query "Stacks[0].Outputs[?OutputKey=='ProxyUrl'].OutputValue" --output text)
+          echo "Staging proxy: $URL"
+          echo "### 🧪 Staging: $URL" >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS "${URL}health" | tee /dev/stderr | grep -q '"stage":"staging"'
+          curl -fsS "${URL}aircraft?lat=32.0055&lon=34.8854&dist=43" | head -c 300; echo
+          curl -sS "${URL}flight?num=1" | head -c 400; echo
+
   deploy:
-    name: פריסה ל-AWS
+    name: פריסה ל-production
     needs: test
     # רק ב-push ל-main, ורק אם הוגדר תפקיד ה-OIDC (Settings → Variables)
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
@@ -43,6 +99,17 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+
+      - name: בדיקת OIDC (מה GitHub שולח ל-AWS)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const t = await core.getIDToken('sts.amazonaws.com');
+            const p = JSON.parse(Buffer.from(t.split('.')[1], 'base64').toString());
+            core.info(`sub=${p.sub} | aud=${p.aud} | repo=${p.repository}`);
+            core.info(`role=${process.env.ROLE}`);
+        env:
+          ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
 
       - name: התחברות ל-AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -64,7 +131,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides "AlertEmail=${{ secrets.ALERT_EMAIL }}" "BudgetLimitUSD=1" "AllowedOrigin=*" "IvrToken=${{ secrets.IVR_TOKEN }}"
+            --parameter-overrides "Stage=prod" "AlertEmail=${{ secrets.ALERT_EMAIL }}" "BudgetLimitUSD=1" "AllowedOrigin=*" "IvrToken=${{ secrets.IVR_TOKEN }}"
 
       - name: Smoke test
         run: |
