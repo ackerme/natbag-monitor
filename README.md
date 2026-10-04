@@ -1,11 +1,11 @@
 # ✈️ natbag-monitor – ניטור גישה לנתב"ג בזמן אמת
 
-![CI/CD](https://github.com/<USERNAME>/natbag-monitor/actions/workflows/ci-cd.yml/badge.svg)
+![CI/CD](https://github.com/ackerme/natbag-monitor/actions/workflows/ci-cd.yml/badge.svg) ![CodeQL](https://github.com/ackerme/natbag-monitor/actions/workflows/codeql.yml/badge.svg)
 
 מערכת שמציגה בזמן אמת את המטוסים באזור נמל התעופה בן גוריון, על מסך רדאר סורק ועל מפת לוויין.
 היא מזהה אוטומטית מטוסים בגישה לנחיתה ומתריעה כשמטוס בגישה הסופית סוטה מהכיוון לשדה.
 
-**צפייה חיה:** `https://<USERNAME>.github.io/natbag-monitor/`
+**צפייה חיה:** `https://ackerme.github.io/natbag-monitor/`
 
 ![צילום מסך](docs/screenshot.png)
 
@@ -52,6 +52,15 @@ flowchart LR
 - **CloudWatch Logs:** הלוגים נשמרים 3 ימים, כדי שלא תצטבר עלות אחסון.
 - **ניטור:** מדדים, בדיקת זמינות כל 5 דקות, 7 התרעות במייל ולוח בקרה. פירוט בהמשך.
 - **IAM:** לכל פונקציה יש רק את ההרשאות שהיא צריכה (least privilege).
+
+## אבטחה בתהליך הפיתוח (DevSecOps)
+
+- **סריקת סודות (gitleaks):** רצה בכל push כחלק מה-CI. פריסה ל-AWS לא תצא אם נמצא סוד בקוד.
+- **CodeQL:** סריקה סטטית של קוד ה-JavaScript (כללי `security-extended`), בכל push ופעם בשבוע. התוצאות מופיעות ב-Security → Code scanning.
+- **Dependabot:** פעם בשבוע בודק גרסאות חדשות של ה-Actions ושל חבילות npm, ופותח Pull Request לבד.
+- **Push Protection:** GitHub חוסם כבר בזמן ה-push העלאה של מפתח מוכר, כמו AWS או GitHub.
+
+פירוט מלא נמצא ב-[SECURITY.md](SECURITY.md).
 
 ## סטטיסטיקות ומצב המערכת (`stats.html`)
 
@@ -105,8 +114,9 @@ flowchart LR
 ## קו טלפוני (IVR) לטלפונים כשרים
 
 מתקשרים ל[ימות המשיח](https://www.yemot.co.il) ובוחרים בתפריט:
-- **1, כלי הטיס סביב נמל התעופה:** המערכת מקריאה את כל כלי הטיס שבאוויר ברדיוס 100 ק"מ, מהקרוב לרחוק, שלושה בכל פעם. לכל אחד היא אומרת חברה ומספר טיסה (או מסוק או מטוס קל), דגם (למשל בואינג 787), מרחק, כיוון, גובה, והאם הוא בגישה לנחיתה בנתב"ג.
-- **2, בירור טיסה מלוח הטיסות:** מקישים את מספר הטיסה ושומעים את הסטטוס, את שעת הנחיתה המתוכננת והמעודכנת, ואם המטוס באוויר גם את המרחק שלו מהשדה.
+- **1, נחיתות:** המטוסים שבגישה לנחיתה עכשיו, עם זמן נחיתה משוער, ואחריהם הנחיתות הבאות מלוח הטיסות.
+- **2, המראות:** המטוסים שהמריאו בדקות האחרונות, ואחריהם ההמראות הבאות מלוח הטיסות.
+- **3, בירור טיסה לפי מספר:** סטטוס, שעה מתוכננת ומעודכנת, ואם המטוס באוויר גם המרחק שלו מהשדה.
 הנתונים מגיעים מלוח הטיסות של רשות שדות התעופה (data.gov.il) ומ-ADS-B. הקוד נמצא ב-`natbag-aws/src/proxy/flights.mjs`, וההוראות ב-[natbag-aws/README.md](natbag-aws/README.md).
 
 ## CI/CD
@@ -228,7 +238,7 @@ sam deploy --guided
 
 ## טכנולוגיות
 
-`GitHub Actions` · `OIDC` · `node:test` · `CloudWatch Alarms / Dashboards / EMF` · `EventBridge` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
+`GitHub Actions` · `OIDC` · `CodeQL` · `Dependabot` · `gitleaks` · `node:test` · `CloudWatch Alarms / Dashboards / EMF` · `EventBridge` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
 
 ## מקורות נתונים
 
