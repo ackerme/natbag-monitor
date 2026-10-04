@@ -5,6 +5,13 @@ Description: >
   עם תקציב, התרעה במייל ומתג כיבוי אוטומטי.
 
 Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, staging]
+    Description: >
+      prod = הסביבה האמיתית (עם תקציב, מתג כיבוי, ניטור והתרעות).
+      staging = סביבת בדיקה: רק שרת הביניים, בשמות נפרדים (natbag-staging-*), בלי התרעות ובלי מדדים.
   AlertEmail:
     Type: String
     Description: כתובת המייל לקבלת התרעות תקציב
@@ -14,17 +21,29 @@ Parameters:
     Default: 1
     MinValue: 1
     Description: תקציב חודשי בדולרים. מעבר לסכום הזה שרת הביניים נכבה אוטומטית.
+  IvrToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: סיסמה לקו הטלפוני (ימות המשיח). אם מוגדרת – רק בקשות עם token=<הסיסמה> ייענו.
   AllowedOrigin:
     Type: String
     Default: "*"
     Description: מאיפה מותר לקרוא לשרת. "*" = מכל מקום (כולל קובץ מהמחשב). אפשר לשים https://USERNAME.github.io
+  SiteUrl:
+    Type: String
+    Default: "https://ackerme.github.io/natbag-monitor/monitor.html"
+    Description: כתובת האתר שבדיקת הזמינות בודקת כל 5 דקות. ריק = בלי בדיקת אתר
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
 
 Resources:
   # ───────────── שרת הביניים ─────────────
   ProxyFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: natbag-proxy
+      FunctionName: !If [IsProd, natbag-proxy, natbag-staging-proxy]
       CodeUri: src/proxy/
       Handler: index.handler
       Runtime: nodejs22.x
@@ -36,16 +55,24 @@ Resources:
       Environment:
         Variables:
           SSM_PREFIX: /natbag/opensky
+          IVR_TOKEN: !Ref IvrToken
+          IAA_RESOURCE_ID: e83f763b-b7d7-479e-b172-ae981ddc6de5
+          METRICS_NAMESPACE: !If [IsProd, Natbag, ""]   # ב-staging לא שולחים מדדים (נשארים ב-Free Tier)
+          STAGE: !Ref Stage
+          STATS_TABLE: !If [IsProd, natbag-watch, ""]   # לנתיב /stats (קריאה בלבד)
       Policies:
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameters
               Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/opensky/*
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
 
   ProxyLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/natbag-proxy
+      LogGroupName: !If [IsProd, /aws/lambda/natbag-proxy, /aws/lambda/natbag-staging-proxy]
       RetentionInDays: 3              # לוגים נמחקים אחרי 3 ימים – לא מצטברת עלות אחסון
 
   ProxyUrl:
@@ -75,14 +102,16 @@ Resources:
       Principal: "*"
       InvokedViaFunctionUrl: true
 
-  # ───────────── תקציב + מתג כיבוי ─────────────
+  # ───────────── תקציב + מתג כיבוי (רק ב-prod – התקציב הוא על כל החשבון) ─────────────
   BudgetAlertTopic:
     Type: AWS::SNS::Topic
+    Condition: IsProd
     Properties:
       TopicName: natbag-budget-alerts
 
   BudgetAlertTopicPolicy:
     Type: AWS::SNS::TopicPolicy
+    Condition: IsProd
     Properties:
       Topics: [!Ref BudgetAlertTopic]
       PolicyDocument:
@@ -100,10 +129,10 @@ Resources:
 
   MonthlyBudget:
     Type: AWS::Budgets::Budget
+    Condition: IsProd
     DependsOn: BudgetAlertTopicPolicy
     Properties:
       Budget:
-        BudgetName: natbag-monthly
         BudgetType: COST
         TimeUnit: MONTHLY
         BudgetLimit:
@@ -133,6 +162,7 @@ Resources:
 
   KillSwitchFunction:
     Type: AWS::Serverless::Function
+    Condition: IsProd
     Properties:
       FunctionName: natbag-killswitch
       CodeUri: src/killswitch/
@@ -159,9 +189,297 @@ Resources:
 
   KillSwitchLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: IsProd
     Properties:
       LogGroupName: /aws/lambda/natbag-killswitch
       RetentionInDays: 30
+
+  # ───────────── ניטור (Observability) – רק ב-prod ─────────────
+  # התרעות על המערכת עצמה נשלחות למייל דרך SNS. צריך לאשר את המייל הראשון ש-AWS שולחת ("Confirm subscription").
+  OpsAlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: IsProd
+    Properties:
+      TopicName: natbag-ops-alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  # בדיקת זמינות מבחוץ כל 5 דקות: /health, /aircraft והאתר
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Properties:
+      FunctionName: natbag-healthcheck
+      CodeUri: src/healthcheck/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 20
+      LoggingConfig:
+        LogGroup: !Ref HealthCheckLogGroup
+      Environment:
+        Variables:
+          PROXY_URL: !GetAtt ProxyUrl.FunctionUrl
+          SITE_URL: !Ref SiteUrl
+          TABLE: !Ref WatchTable          # מונים יומיים לדף "מצב המערכת"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt WatchTable.Arn
+      Events:
+        Every5Min:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+  HealthCheckLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Properties:
+      LogGroupName: /aws/lambda/natbag-healthcheck
+      RetentionInDays: 3
+
+  # שגיאות בקוד של השרת
+  AlarmProxyErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-errors
+      AlarmDescription: שרת הביניים זרק שגיאות
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # בקשות שנחסמו – למשל אחרי שמתג הכיבוי הופעל
+  AlarmProxyThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-throttles
+      AlarmDescription: בקשות לשרת נחסמות (ייתכן שמתג הכיבוי הופעל)
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # השרת איטי: p90 מעל 4 שניות, 15 דקות ברצף
+  AlarmProxySlow:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-slow
+      AlarmDescription: 10% מהבקשות לוקחות יותר מ-4 שניות, כבר 15 דקות
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      ExtendedStatistic: p90
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 4000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # כל שלושת מקורות ה-ADS-B נפלו (לפחות 3 פעמים ב-15 דקות)
+  AlarmAdsbDown:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-adsb-sources-down
+      AlarmDescription: כל מקורות ה-ADS-B (adsb.lol, airplanes.live, adsb.fi) לא עונים
+      Namespace: Natbag
+      MetricName: UpstreamFailure
+      Dimensions: [{ Name: Route, Value: aircraft }]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # לוח הטיסות של רשות שדות התעופה לא זמין → הקו הטלפוני לא יכול לענות
+  AlarmBoardDown:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-board-down
+      AlarmDescription: לוח הטיסות של רשות שדות התעופה (data.gov.il) לא זמין – הקו הטלפוני מושפע
+      Namespace: Natbag
+      MetricName: UpstreamFailure
+      Dimensions: [{ Name: Route, Value: board }]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # בדיקת הזמינות נכשלה פעמיים ברצף (10 דקות)
+  AlarmHealthCheck:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-healthcheck-failed
+      AlarmDescription: בדיקת הזמינות החיצונית נכשלה פעמיים ברצף (השרת או האתר לא עונים)
+      Namespace: Natbag
+      MetricName: HealthCheckFailed
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # ───────────── התרעה טלפונית על חריגה בתנועה האווירית (רק ב-prod) ─────────────
+  # natbag-watcher רץ כל דקה, מחשב את מדד החריגה (אותה לוגיקה כמו בדף), ומתקשר דרך ימות המשיח
+  # כשהמדד עובר ל"חריגה משמעותית" – לכל היותר שיחה אחת בחצי שעה.
+  WatchTable:
+    Type: AWS::DynamoDB::Table
+    Condition: IsProd
+    Properties:
+      TableName: natbag-watch
+      # קיבולת קבועה קטנה (10/10) – בתוך ה-Always Free של DynamoDB (25 יחידות), כלומר 0$.
+      # (PAY_PER_REQUEST היה עולה כמה סנטים בחודש על כתיבה כל דקה)
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: { ReadCapacityUnits: 10, WriteCapacityUnits: 10 }
+      AttributeDefinitions: [{ AttributeName: pk, AttributeType: S }]
+      KeySchema: [{ AttributeName: pk, KeyType: HASH }]
+
+  WatcherFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Properties:
+      FunctionName: natbag-watcher
+      CodeUri: src/watcher/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 30
+      LoggingConfig:
+        LogGroup: !Ref WatcherLogGroup
+      Environment:
+        Variables:
+          PROXY_URL: !GetAtt ProxyUrl.FunctionUrl
+          TABLE: !Ref WatchTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem]
+              Resource: !GetAtt WatchTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/yemot/*
+      Events:
+        EveryMinute:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+
+  WatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Properties:
+      LogGroupName: /aws/lambda/natbag-watcher
+      RetentionInDays: 3
+
+  AlarmWatcherErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-watcher-errors
+      AlarmDescription: המעקב בצד השרת (natbag-watcher) נכשל 3 פעמים ב-10 דקות – ההתרעה הטלפונית לא פועלת
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref WatcherFunction }]
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Condition: IsProd
+    Properties:
+      DashboardName: natbag
+      DashboardBody: !Sub |
+        {
+          "start": "-PT6H",
+          "widgets": [
+            { "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": { "markdown": "## ✈ natbag-monitor\nשרת הביניים, מקורות הנתונים ובדיקת הזמינות. מדדי Natbag נשלחים מהקוד ב-Embedded Metric Format." } },
+            { "type": "alarm", "x": 0, "y": 2, "width": 24, "height": 3,
+              "properties": { "title": "מצב ההתרעות", "alarms": [
+                "${AlarmHealthCheck.Arn}", "${AlarmProxyErrors.Arn}", "${AlarmProxyThrottles.Arn}",
+                "${AlarmProxySlow.Arn}", "${AlarmAdsbDown.Arn}", "${AlarmBoardDown.Arn}", "${AlarmWatcherErrors.Arn}" ] } },
+            { "type": "metric", "x": 0, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "בקשות ושגיאות", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${ProxyFunction}", { "label": "בקשות" } ],
+                  [ ".", "Errors", ".", ".", { "label": "שגיאות", "color": "#d62728" } ],
+                  [ ".", "Throttles", ".", ".", { "label": "נחסמו", "color": "#ff7f0e" } ] ] } },
+            { "type": "metric", "x": 8, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "זמן תגובה (ms)", "region": "${AWS::Region}", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${ProxyFunction}", { "stat": "p50", "label": "חציון" } ],
+                  [ "...", { "stat": "p90", "label": "p90" } ],
+                  [ "...", { "stat": "Maximum", "label": "מקסימום" } ] ] } },
+            { "type": "metric", "x": 16, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "בדיקת זמינות (כל 5 דקות)", "region": "${AWS::Region}", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "Natbag", "HealthCheckFailed", { "stat": "Sum", "label": "נכשלה", "color": "#d62728" } ],
+                  [ ".", "HealthCheckLatency", { "stat": "Maximum", "label": "זמן (ms)", "yAxis": "right" } ] ] } },
+            { "type": "metric", "x": 0, "y": 11, "width": 12, "height": 6,
+              "properties": { "title": "איזה מקור ADS-B ענה", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries", "stacked": true,
+                "metrics": [
+                  [ "Natbag", "SourceUsed", "Source", "adsb.lol" ],
+                  [ "...", "airplanes.live" ],
+                  [ "...", "adsb.fi" ] ] } },
+            { "type": "metric", "x": 12, "y": 11, "width": 12, "height": 6,
+              "properties": { "title": "מקורות חיצוניים שנכשלו", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "Natbag", "UpstreamFailure", "Route", "aircraft", { "label": "ADS-B" } ],
+                  [ "...", "mil", { "label": "מטוסים צבאיים" } ],
+                  [ "...", "tracked", { "label": "Flightradar24" } ],
+                  [ "...", "board", { "label": "לוח טיסות (data.gov.il)" } ] ] } },
+            { "type": "metric", "x": 0, "y": 17, "width": 24, "height": 5,
+              "properties": { "title": "מדד החריגה בתנועה האווירית (0 שגרה · 2+ חריגה · 4+ משמעותית)", "region": "${AWS::Region}", "period": 60, "stat": "Maximum", "view": "timeSeries",
+                "metrics": [ [ "Natbag", "AirspaceScore", { "label": "ציון" } ] ],
+                "annotations": { "horizontal": [ { "value": 2, "label": "חריגה", "color": "#ff9900" }, { "value": 4, "label": "משמעותית", "color": "#d62728" } ] } } },
+            { "type": "log", "x": 0, "y": 22, "width": 24, "height": 6,
+              "properties": { "title": "שגיאות אחרונות", "region": "${AWS::Region}", "view": "table",
+                "query": "SOURCE '/aws/lambda/natbag-proxy' | fields @timestamp, route, details | filter level = 'error' | sort @timestamp desc | limit 20" } }
+          ]
+        }
 
 Outputs:
   ProxyUrl:
@@ -170,3 +488,7 @@ Outputs:
   HealthCheck:
     Description: פתח בדפדפן לבדיקה
     Value: !Sub "${ProxyUrl.FunctionUrl}health"
+  DashboardUrl:
+    Condition: IsProd
+    Description: לוח הניטור ב-CloudWatch
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/natbag"
