@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  תפקיד IAM ש-GitHub Actions יכול להשתמש בו (OIDC) כדי לפרוס את natbag – בלי מפתחות גישה.
+  מקימים פעם אחת מ-CloudShell (ההוראות ב-README).
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: שם המשתמש ב-GitHub (למשל ackerme)
+  RepoName:
+    Type: String
+    Default: natbag-monitor
+  GitHubOwnerId:
+    Type: String
+    Default: "198591419"
+    Description: המזהה המספרי של המשתמש ב-GitHub (מופיע ב-sub של GitHub בפורמט החדש owner@id)
+  RepoId:
+    Type: String
+    Default: "1392267841"
+    Description: המזהה המספרי של ה-repo (repo@id)
+  CreateOIDCProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: '"false" אם כבר קיים בחשבון OIDC provider של GitHub'
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: gha-natbag-deploy     # לא מתחיל ב-natbag- כדי שלא יוכל לשנות את ההרשאות של עצמו
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # רק workflows מה-repo שלך (כל ענף / סביבה).
+              # GitHub שולח היום sub עם מזהים קבועים: repo:ackerme@198591419/natbag-monitor@1392267841:environment:production
+              # (המזהים לא משתנים גם אם מישהו ייצור repo בשם זהה – בטוח יותר). משאירים גם את הפורמט הישן.
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOwner}@${GitHubOwnerId}/${RepoName}@${RepoId}:*
+                  - !Sub repo:${GitHubOwner}/${RepoName}:*
+      Policies:
+        - PolicyName: natbag-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormationStack
+                Effect: Allow
+                Action: cloudformation:*
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/natbag/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/natbag-staging/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-default/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Sid: CloudFormationRead
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStacks
+                Resource: "*"
+              - Sid: SamArtifactsBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketVersioning
+                  - s3:PutBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:CreateBucket
+                  - s3:PutBucketTagging
+                Resource:
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*/*
+              - Sid: LambdaFunctions
+                Effect: Allow
+                Action: lambda:*
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:natbag-*
+              - Sid: LambdaRead
+                Effect: Allow
+                Action:
+                  - lambda:GetAccountSettings
+                  - lambda:ListFunctions
+                Resource: "*"
+              - Sid: FunctionRoles
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/natbag-*
+              - Sid: Logs
+                Effect: Allow
+                Action: logs:*
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/natbag-*
+              - Sid: LogsRead
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: "*"
+              - Sid: Topics
+                Effect: Allow
+                Action: sns:*
+                Resource: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:natbag-*
+              - Sid: Monitoring
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:TagResource
+                  - cloudwatch:UntagResource
+                  - cloudwatch:ListTagsForResource
+                Resource: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:natbag-*
+              - Sid: WatchTable
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:DescribeContributorInsights
+                  - dynamodb:DescribeKinesisStreamingDestination
+                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-*
+              - Sid: MonitoringRead
+                Effect: Allow
+                Action: [cloudwatch:DescribeAlarms, events:ListRules]
+                Resource: "*"
+              - Sid: Dashboard
+                Effect: Allow
+                Action: [cloudwatch:PutDashboard, cloudwatch:GetDashboard, cloudwatch:DeleteDashboards]
+                Resource: !Sub arn:${AWS::Partition}:cloudwatch::${AWS::AccountId}:dashboard/natbag
+              - Sid: Schedule
+                Effect: Allow
+                Action: [events:PutRule, events:DeleteRule, events:DescribeRule, events:PutTargets, events:RemoveTargets, events:TagResource, events:UntagResource]
+                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/natbag-*
+              - Sid: Budget
+                Effect: Allow
+                Action:
+                  - budgets:ViewBudget
+                  - budgets:ModifyBudget
+                  - budgets:ListTagsForResource
+                  - budgets:TagResource
+                Resource: !Sub arn:${AWS::Partition}:budgets::${AWS::AccountId}:budget/*
+
+Outputs:
+  RoleArn:
+    Description: להדביק ב-GitHub → Settings → Secrets and variables → Actions → Variables → AWS_DEPLOY_ROLE_ARN
+    Value: !GetAtt DeployRole.Arn

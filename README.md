@@ -1,250 +1,180 @@
-# ✈️ natbag-monitor – ניטור גישה לנתב"ג בזמן אמת
+# natbag-aws
 
-![CI/CD](https://github.com/ackerme/natbag-monitor/actions/workflows/ci-cd.yml/badge.svg) ![CodeQL](https://github.com/ackerme/natbag-monitor/actions/workflows/codeql.yml/badge.svg)
-
-מערכת שמציגה בזמן אמת את המטוסים באזור נמל התעופה בן גוריון, על מסך רדאר סורק ועל מפת לוויין.
-היא מזהה אוטומטית מטוסים בגישה לנחיתה ומתריעה כשמטוס בגישה הסופית סוטה מהכיוון לשדה.
-
-**צפייה חיה:** `https://ackerme.github.io/natbag-monitor/`
-
-![צילום מסך](docs/screenshot.png)
+שרת ביניים ב-AWS Lambda בשביל מוניטור נתב"ג. כולל תקציב חודשי ומתג כיבוי אוטומטי.
+הכל מוגדר כקוד (AWS SAM / CloudFormation) ועולה בפקודה אחת.
 
 ## ארכיטקטורה
 
-```mermaid
-flowchart LR
-    B[דפדפן<br/>monitor.html] -->|GET /aircraft<br/>כל 60 שנ'| U[Lambda Function URL<br/>CORS]
-    U --> P[natbag-proxy<br/>Node.js 22 · arm64]
-    P -->|1| A[adsb.lol]
-    P -->|2 גיבוי| L[airplanes.live]
-    P -->|3 גיבוי| F[adsb.fi]
-    P -.->|/opensky| O[OpenSky OAuth2]
-    P -.-> S[(SSM Parameter Store<br/>מפתח מוצפן)]
-    BU[AWS Budgets<br/>$1 לחודש] -->|חריגה| SN[SNS] --> K[natbag-killswitch]
-    K -->|concurrency = 0| P
-    HC[natbag-healthcheck<br/>כל 5 דק'] -->|בודק מבחוץ| U
-    P -.->|מדדי EMF| CW[CloudWatch<br/>Alarms + Dashboard]
-    HC -.-> CW
-    CW -->|תקלה / חזר לתקין| OPS[SNS → מייל]
-    W[natbag-watcher<br/>כל דקה] -->|/aircraft| U
-    W <--> DB[(DynamoDB<br/>היסטוריה ושובלים)]
-    W -->|חריגה משמעותית| Y[ימות המשיח<br/>שיחה טלפונית]
+```
+דפדפן ──► Lambda Function URL ──► natbag-proxy ──► adsb.lol / airplanes.live / adsb.fi / OpenSky
+                                        │
+                                        └── SSM Parameter Store (מפתח OpenSky, מוצפן)
+
+AWS Budgets ──(עלות > $1)──► SNS ──► natbag-killswitch ──► concurrency של natbag-proxy = 0
 ```
 
-## מה יש בפרויקט
+## מה יש בפנים
 
-**Frontend** (בלי build):
-- `index.html`: דף פתיחה עם הסבר על המערכת ואנימציה של מטוס בדפוס המתנה.
-- `monitor.html`: המערכת עצמה.
-- `stats.html`: סטטיסטיקות יומיות ומצב המערכת.
-
-מה יש במערכת:
-- מסך רדאר ב-Canvas: קרן סורקת, כל מטוס מוצג כנקודה במיקום ובמרחק האמיתיים שלו מהשדה, וטבעות מרחק.
-- תצוגה מפוצלת (⊞ 4 מסכים): ארבעה מסכי רדאר, כל אחד מסונן לפי סוג: מטוסי נוסעים, מטוסי תדלוק (עם טווח שגדל לבד עד המטוס הרחוק), מטוסים קלים ומסוקים, וכל כלי הטיס. זו תצוגה בלבד, והתנאים של ההתרעות לא משתנים.
-- מפת לוויין (Leaflet ו-Esri) עם סימון אזור הגישה הסופית.
-- רשימת מטוסים עם סטטוס לכל אחד: על הקרקע, המראה, בגישה או בגישה סופית.
-- רענון אוטומטי כל דקה, שורת סטטוס שמראה איזה מקור נתונים ענה, ומצב הדגמה עם נתונים מדומים.
-
-**Backend** (`natbag-aws/`, Infrastructure as Code עם AWS SAM):
-- **Lambda עם Function URL:** פתרון ל-CORS, מעבר אוטומטי בין שלושה מקורות נתונים, מטמון של 10 שניות ודחיסת gzip (בערך פי 7 פחות תעבורה).
-- **SSM Parameter Store:** מפתח OpenSky נשמר מוצפן ולא מופיע בקוד.
-- **Budgets, SNS ו-Kill Switch:** כשהעלות החודשית עוברת 1$, שרת הביניים נכבה אוטומטית.
-- **CloudWatch Logs:** הלוגים נשמרים 3 ימים, כדי שלא תצטבר עלות אחסון.
-- **ניטור:** מדדים, בדיקת זמינות כל 5 דקות, 7 התרעות במייל ולוח בקרה. פירוט בהמשך.
-- **IAM:** לכל פונקציה יש רק את ההרשאות שהיא צריכה (least privilege).
-
-## אבטחה בתהליך הפיתוח (DevSecOps)
-
-- **סריקת סודות (gitleaks):** רצה בכל push כחלק מה-CI. פריסה ל-AWS לא תצא אם נמצא סוד בקוד.
-- **CodeQL:** סריקה סטטית של קוד ה-JavaScript (כללי `security-extended`), בכל push ופעם בשבוע. התוצאות מופיעות ב-Security → Code scanning.
-- **Dependabot:** פעם בשבוע בודק גרסאות חדשות של ה-Actions ושל חבילות npm, ופותח Pull Request לבד.
-- **Push Protection:** GitHub חוסם כבר בזמן ה-push העלאה של מפתח מוכר, כמו AWS או GitHub.
-
-פירוט מלא נמצא ב-[SECURITY.md](SECURITY.md).
-
-## סטטיסטיקות ומצב המערכת (`stats.html`)
-
-דף ציבורי שמתעדכן כל דקה, מתוך נתונים שהמערכת אוספת בעצמה ושומרת ב-DynamoDB:
-
-- **התנועה היום:**
-  - נחיתות והמראות, עם גרף לפי שעה מול הממוצע של הימים הקודמים.
-  - השעה העמוסה ביותר, והחברות הפעילות ביותר.
-  - התרעות סטייה ודקות חריגה.
-  - השוואה ל-7 הימים האחרונים.
-  - הנתונים נאספים ע"י `natbag-watcher` (רשומה `stats#YYYY-MM-DD`).
-- **מצב המערכת (Status page / SLO):**
-  - זמינות ב-30 ימים ובהיום, עם פס זמינות יומי.
-  - זמן תגובה ממוצע, והבדיקה האחרונה (כולל איזה מקור ADS-B ענה).
-  - הנתונים נאספים ע"י `natbag-healthcheck` (רשומה `health#YYYY-MM-DD`, מונים אטומיים).
-
-הדף קורא ל-`/stats` בשרת, שמביא 7 ימי סטטיסטיקה ו-30 ימי זמינות בקריאה אחת (`BatchGetItem`). החישוב עצמו נמצא ב-`natbag-aws/src/proxy/stats.mjs`. אין כאן מדדי CloudWatch נוספים, כך שהעלות נשארת 0$.
-
-בכל הדפים יש תפריט אחיד: בית · רדאר · סטטיסטיקות · מצב המערכת · קו טלפוני · איך זה עובד.
-
-## ניטור (Observability)
-
-המערכת מנטרת את עצמה, כדי שאדע על תקלה לפני שמשתמש נתקל בה.
-
-- **מדדים מהקוד (Embedded Metric Format):** השרת כותב שורת JSON מיוחדת ללוג, ו-CloudWatch הופך אותה למדד. בלי קריאות API ובלי הרשאות נוספות.
-  - `SourceUsed{Source}`: איזה מקור ADS-B ענה (adsb.lol, airplanes.live או adsb.fi).
-  - `UpstreamFailure{Route}`: מקור חיצוני שנכשל (ADS-B, מטוסים צבאיים, Flightradar24 או לוח הטיסות).
-- **בדיקת זמינות חיצונית (`natbag-healthcheck`):** Lambda שרצה כל 5 דקות ובודקת מבחוץ, כמו משתמש, את `/health`, את `/aircraft` ואת האתר ב-GitHub Pages.
-- **התרעות במייל (SNS), כולל הודעה כשהמצב חוזר לתקין:**
-
-| התרעה | מתי |
+| רכיב | תפקיד |
 |---|---|
-| `natbag-healthcheck-failed` | בדיקת הזמינות נכשלה פעמיים ברצף |
-| `natbag-proxy-errors` | השרת זרק שגיאה |
-| `natbag-proxy-throttles` | בקשות נחסמות, למשל אחרי שמתג הכיבוי הופעל |
-| `natbag-proxy-slow` | ‏p90 של זמן התגובה מעל 4 שניות במשך 15 דקות |
-| `natbag-adsb-sources-down` | כל שלושת מקורות ה-ADS-B נפלו |
-| `natbag-board-down` | לוח הטיסות של רשות שדות התעופה לא זמין, ולכן גם הקו הטלפוני |
-| `natbag-watcher-errors` | המעקב בצד השרת נכשל, ולכן ההתרעה הטלפונית לא פועלת |
-
-- **לוח בקרה (CloudWatch Dashboard `natbag`):** מצב ההתרעות, בקשות ושגיאות, זמני תגובה (p50 ו-p90), תוצאות בדיקת הזמינות, איזה מקור ענה, ואילו מקורות נכשלו. בתחתית יש טבלה של השגיאות האחרונות מתוך הלוגים (Logs Insights).
-
-הכול מוגדר כקוד ב-`template.yaml` ונשאר בתוך ה-Free Tier: 7 התרעות מתוך 10, ו-10 מדדים מותאמים מתוך 10. גם טבלת DynamoDB מוגדרת בקיבולת קבועה קטנה (10/10), בתוך ה-Always Free (25).
-
-## התרעה טלפונית על חריגה
-
-`natbag-watcher` רץ בשרת כל דקה, גם כשאף דף לא פתוח. הוא מחשב את מדד החריגה באותה לוגיקה בדיוק כמו הדף: `detect.cjs` הוא עותק של `detect.js`, ובדיקה אוטומטית מוודאת שהשניים זהים. ההיסטוריה והשובלים נשמרים ב-DynamoDB.
-
-כשהמדד עובר ל**חריגה משמעותית**, המערכת מתקשרת לטלפון שהוגדר דרך ימות המשיח (קמפיין עם הקראה) ומקריאה את הסיבות. יש לכל היותר שיחה אחת בחצי שעה, ואין שיחה חוזרת כל עוד המצב נשאר משמעותי. ציון המדד מוצג גם בלוח הבקרה.
-
-## קו טלפוני (IVR) לטלפונים כשרים
-
-מתקשרים ל[ימות המשיח](https://www.yemot.co.il) ובוחרים בתפריט:
-- **1, נחיתות:** המטוסים שבגישה לנחיתה עכשיו, עם זמן נחיתה משוער, ואחריהם הנחיתות הבאות מלוח הטיסות.
-- **2, המראות:** המטוסים שהמריאו בדקות האחרונות, ואחריהם ההמראות הבאות מלוח הטיסות.
-- **3, בירור טיסה לפי מספר:** סטטוס, שעה מתוכננת ומעודכנת, ואם המטוס באוויר גם המרחק שלו מהשדה.
-הנתונים מגיעים מלוח הטיסות של רשות שדות התעופה (data.gov.il) ומ-ADS-B. הקוד נמצא ב-`natbag-aws/src/proxy/flights.mjs`, וההוראות ב-[natbag-aws/README.md](natbag-aws/README.md).
-
-## CI/CD
-
-```mermaid
-flowchart LR
-    D[git push] --> T[GitHub Actions<br/>npm test · 69 בדיקות]
-    T -->|ענף dev| SO[OIDC → AWS] --> SS[sam deploy<br/>natbag-staging] --> SH[Smoke test<br/>stage=staging]
-    T -->|ענף main| PO[OIDC → AWS] --> PS[sam deploy<br/>natbag] --> PH[Smoke test]
-    SH -.->|Pull Request dev → main| T
-```
-
-**שתי סביבות, מאותו קוד ומאותה תבנית:**
-
-| | staging | production |
-|---|---|---|
-| ענף | `dev` | `main` |
-| CloudFormation stack | `natbag-staging` | `natbag` |
-| מה נפרס | רק שרת הביניים (`natbag-staging-proxy`) | שרת, תקציב, מתג כיבוי, ניטור והתרעות |
-| GitHub Environment | `staging` | `production` |
-| הדף | `monitor.html?env=staging` | `monitor.html` |
-
-ההבדל נקבע בפרמטר `Stage` ב-`template.yaml` ובתנאי `IsProd`. ב-staging לא נשלחים מדדים ואין התרעות, כדי להישאר ב-Free Tier ולא לקבל מיילים על סביבת בדיקה.
-
-- **בדיקות** (`tests/`): 69 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
-  - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
-  - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
-- **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
-- **Smoke test:** אחרי כל פריסה ה-workflow בודק שהשרת החדש עונה.
-
-## סוג כלי הטיס
-
-המערכת מסווגת כל כלי טיס לפי מה שהוא משדר ב-ADS-B: קטגוריית גודל, קוד דגם, דגל צבאי ו-callsign. הקוד נמצא ב-`aircraftClass` ב-`detect.js`.
-
-| סוג | דוגמה | התרעות |
-|---|---|---|
-| ✈ נוסעים / מסחרי | ELY027 (B789), ISR580 (A320) | כן |
-| 🛩 מטוס קל / פרטי | 4XHSG (EV97) | לא |
-| 🚁 מסוק | קטגוריה A7 | לא |
-| 🎖 צבאי | C-17 עם דגל צבאי | לא |
-| ⛽ מטוס תדלוק צבאי | KC-135, KC-46, 707 | התרעה נפרדת |
-
-התרעות הסטייה ומדד החריגה מתייחסים **רק למטוסי נוסעים**.
-
-## התרעת מטוסי תדלוק
-
-התרעה שלישית, נפרדת משתי האחרות: פס סגול עם ⛽ וצליל משלה.
-היא קופצת כשמשדרים באזור (ממזרח הים התיכון ועד עיראק) **שני מטוסי תדלוק צבאיים או יותר של ארה"ב או ישראל**. המדינה נקבעת לפי טווח כתובת ה-ICAO של המטוס.
-הנתונים מגיעים מ-`/v2/mil` של adsb.lol דרך נתיב `/mil` בשרת.
-
-> הרשימה כוללת רק מטוסים שמשדרים ADS-B בפומבי. מטוסים צבאיים רבים טסים בלי שידור, ולכן הרשימה חלקית ואינה מעידה בהכרח על אירוע.
-
-## התרעת טיסה עם הרבה עוקבים
-
-התרעה רביעית, נפרדת מהאחרות: פס טורקיז עם 👁 וצליל משלה.
-היא קופצת כשטיסה שנוחתת בנתב"ג או יוצאת ממנו, או מטוס שנמצא עכשיו באזור, נמצאת ברשימת **Most tracked** של Flightradar24 עם **מעל 1,000 עוקבים**. זה קורה בדרך כלל כשמשהו חריג קורה: חירום, נחיתה חריגה, טיסה מיוחדת.
-השרת מושך את הרשימה לכל היותר פעם ב-2 דקות (נתיב `/tracked`), וההתאמה נעשית ב-`trackedStatus` ב-`detect.js`, לפי קוד שדה התעופה או לפי callsign.
-
-> המקור לא רשמי: זו הכתובת שהאתר של Flightradar24 משתמש בה בעצמו, והשימוש בה לימודי בלבד. אם המקור חוסם או לא עונה, הפיצ'ר פשוט לא מוצג ושאר המערכת ממשיכה לעבוד.
-
-## מדד חריגה בתנועה האווירית
-
-תג בפינת הרדאר מציג את מצב התנועה האווירית סביב השדה: **רגיל**, **חריגה** או **חריגה משמעותית**.
-המדד משקלל כמה סימנים, והקוד שלו נמצא ב-`airspaceStatus` ב-`detect.js`:
-
-| סימן | איך מזהים |
-|---|---|
-| מטוסים בהמתנה | בשובל של 10 הדקות האחרונות סכום הפניות הוא 300° ומעלה (סיבוב מלא) |
-| מטוסים שהסתובבו | מטוס שהיה בגישה, ועכשיו פונה מהשדה ומתרחק ממנו |
-| נחיתות שנעצרו | אין מטוסים בגישה סופית ב-10 הדקות האחרונות, כשבשעה האחרונה היו בממוצע 1.5 ומעלה |
-| ירידה חדה | מספר המטוסים באוויר ירד ל-40% או פחות מהממוצע |
-| קודי חירום | מטוס שמשדר squawk 7700 או 7600 |
-
-**שני סוגי התרעות, שונים זה מזה:**
-
-| | התרעת מטוס בודד | התרעת תנועה אווירית |
-|---|---|---|
-| מתי | מטוס בגישה סופית סוטה מהכיוון לשדה | המדד עולה רמה (רגיל ← חריגה ← משמעותית) |
-| תצוגה | חלון אדום במרכז המסך | פס כתום בראש המסך, או אדום-כתום בחריגה משמעותית |
-| צליל | — | צליל קצר ושונה לכל רמה, עם השתקה |
-| נוסף | — | התראת דפדפן כשהלשונית ברקע, סימן בכותרת הלשונית, הודעה על חזרה לשגרה והיסטוריה |
-
-כדי להשוות לקצב הרגיל, המדד צריך לאסוף כ-10 דקות של נתונים. בשעות שיש בהן מעט תנועה, למשל בלילה, מחסור בנחיתות לא נחשב חריגה.
-
-> ⚠️ זה מדד לתנועה האווירית בלבד. הוא **לא** מערכת התרעה ולא יודע לחזות אירועים ביטחוניים.
-> להתרעות ולהנחיות משתמשים באפליקציית פיקוד העורף.
-
-## לוגיקת הזיהוי
-
-הקוד נמצא ב-`detect.js` ונבדק ב-`tests/detect.test.mjs`. המערכת לא בודקת פרמטר בודד. היא משלבת כמה נתונים מתוך ה-ADS-B כדי לצמצם התרעות שווא:
-
-1. **סינון מטוסים על הקרקע:** מטוס עם `alt_baro = ground`, או מהירות מתחת ל-80 קמ"ש בגובה נמוך, לא משתתף בלוגיקה.
-2. **זיהוי המראה:** מטוס שמטפס ביותר מ-2 מ'/ש' מסומן כהמראה ולא כגישה.
-3. **גישה:** צריך שיתקיימו 2 מתוך 3 תנאים:
-   - בתוך הרדיוס שנבחר
-   - גובה מתחת ל-4,000 מ'
-   - ירידה של יותר מ-1 מ'/ש'
-4. **גישה סופית:** מטוס בגישה שנמצא עד 25 ק"מ מהשדה, מתחת ל-1,800 מ', ויורד.
-5. **סטייה:** ההפרש בין כיוון הטיסה של המטוס (`track`) לבין הכיוון אל השדה. בודקים את זה רק בגישה הסופית, כי שם המטוס כבר אמור להיות מיושר למסלול.
-6. **התרעה:** קופצת רק אם הסטייה גדולה מהסף במשך לפחות 3 קריאות רצופות (בערך דקה וחצי), ולא נמצאת במגמת שיפור.
-
-המערכת ממירה גם יחידות: ADS-B מדווח ברגל, ברגל לדקה ובקשרים, והקוד עובד במטרים, במ'/ש' ובקמ"ש.
-
-## הרצה
-
-**צפייה:** פותחים את `index.html` (דף הפתיחה) או ישר את `monitor.html` בדפדפן, בלי התקנה ובלי שרת מקומי.
-
-**הקמת ה-Backend** (ב-AWS CloudShell):
-```bash
-cd natbag-aws
-sam deploy --guided
-```
-את ה-`ProxyUrl` שמתקבל מדביקים ב-`PROXY_URL` שב-`monitor.html`. הוראות מלאות נמצאות ב-[natbag-aws/README.md](natbag-aws/README.md).
+| `natbag-proxy` | Lambda עם Function URL ציבורי, CORS, מעבר אוטומטי בין מקורות, מטמון של 10 שניות ודחיסת gzip. נתיבים: `/aircraft`, `/opensky`, `/mil` (מטוסים צבאיים באזור, לזיהוי מטוסי תדלוק), `/tracked` (הטיסות הכי נעקבות ב-Flightradar24, מקור לא רשמי), `/stats` (סטטיסטיקה יומית ומצב המערכת), `/flight`, `/ivr` |
+| SSM Parameter Store | שומר את מפתח OpenSky מוצפן (SecureString), כך שהוא לא נמצא בקוד |
+| AWS Budgets | תקציב חודשי של 1$. ב-50% נשלח מייל אזהרה, וב-100% נשלח מייל ומופעל כיבוי |
+| `natbag-killswitch` | מקבל את ההתרעה דרך SNS ומוריד את ה-concurrency של השרת ל-0 |
+| CloudWatch Logs | הלוגים נשמרים 3 ימים בלבד, כדי שלא תצטבר עלות אחסון |
+| `natbag-healthcheck` | בדיקת זמינות כל 5 דקות (EventBridge): ‏`/health`, ‏`/aircraft` והאתר |
+| CloudWatch Alarms | 7 התרעות שנשלחות למייל דרך SNS (`natbag-ops-alerts`), כולל הודעה כשהמצב חוזר לתקין |
+| `natbag-watcher` + DynamoDB | מחשב את מדד החריגה כל דקה בשרת, ומתקשר בטלפון כשיש חריגה משמעותית |
+| CloudWatch Dashboard | לוח בקרה בשם `natbag`. הקישור מופיע ב-Outputs בשם `DashboardUrl` |
 
 ## עלות
 
-- **שימוש רגיל** (בקשה בדקה לכל צופה): **0$**, בתוך ה-Always Free של Lambda.
-- **הגנה מחריגה:** תקציב של 1$ עם כיבוי אוטומטי.
+- **שימוש רגיל** (בקשה אחת בדקה, בערך 43,000 בחודש): **0$**, בתוך ה-Always Free של Lambda.
+- **שימוש חריג:** מתג הכיבוי עוצר את השרת כשהעלות בחשבון עוברת את התקציב.
+  נתוני החיוב של AWS מתעדכנים רק כמה פעמים ביום, ולכן יש עיכוב של כמה שעות עד שהכיבוי נכנס לפעולה.
+- ⚠️ התקציב מחושב על **כל החשבון**. אם יש לך שירותים אחרים בתשלום, הגדל את `BudgetLimitUSD`.
 
-## טכנולוגיות
+## פריסה
 
-`GitHub Actions` · `OIDC` · `CodeQL` · `Dependabot` · `gitleaks` · `node:test` · `CloudWatch Alarms / Dashboards / EMF` · `EventBridge` · `JavaScript` · `HTML5 Canvas` · `Leaflet` · `AWS Lambda` · `AWS SAM / CloudFormation` · `SSM Parameter Store` · `AWS Budgets` · `SNS` · `CloudWatch` · `IAM` · `ADS-B`
+1. **בחירת אזור:** בקונסול של AWS, בפינה הימנית העליונה, בוחרים **US East (N. Virginia) / us-east-1**.
+2. **פתיחת CloudShell:** לוחצים על אייקון הטרמינל בסרגל העליון. CloudShell כבר מגיע עם `sam` מותקן.
+3. **העלאת הקבצים:** בוחרים **Actions** ← **Upload file** ומעלים את `natbag-aws.zip`.
+4. **הרצת הפריסה:**
+   ```bash
+   unzip natbag-aws.zip && cd natbag-aws
+   sam deploy --guided
+   ```
+5. **תשובות לשאלות של הפריסה:**
 
-## מקורות נתונים
+   | שאלה | תשובה |
+   |---|---|
+   | Stack Name | `natbag` |
+   | AWS Region | `us-east-1` |
+   | AlertEmail | המייל שלך |
+   | BudgetLimitUSD | `1` |
+   | AllowedOrigin | `*` |
+   | Confirm changes before deploy | `y` |
+   | Allow SAM CLI IAM role creation | `Y` |
+   | Disable rollback | `N` |
+   | Save arguments to configuration file | `Y` (בשאר השאלות לוחצים Enter) |
+   | Deploy this changeset? | `y` |
 
-- [adsb.lol](https://adsb.lol), [airplanes.live](https://airplanes.live) ו-[adsb.fi](https://adsb.fi): נתוני ADS-B פתוחים.
-- [OpenSky Network](https://opensky-network.org): לשימוש לא מסחרי.
-- [Flightradar24](https://www.flightradar24.com) Most tracked: מקור לא רשמי, לשימוש לימודי.
-- צילומי לוויין: Esri World Imagery. מפות רחובות: © OpenStreetMap, © CARTO.
+6. **בדיקה:** בסוף הפריסה מופיעים **Outputs**. פותחים בדפדפן את `HealthCheck`, וצריך להופיע `{"ok":true,...}`.
+   בנוסף AWS שולחת מייל עם הנושא **AWS Notification - Subscription Confirmation**. לוחצים בו על **Confirm subscription**, אחרת התרעות הניטור לא יגיעו.
+7. **חיבור הדף:** מעתיקים את `ProxyUrl` לדף, לשורה `const PROXY_URL = "...";`.
 
-פרויקט אישי ללמידה. הוא לא מיועד לשימוש מבצעי או בטיחותי.
+## מפתח OpenSky (אופציונלי)
+
+מריצים ב-CloudShell. הפקודה `read -s` מקבלת את הערך בלי להציג אותו על המסך ובלי לשמור אותו בהיסטוריה:
+
+```bash
+read -rsp "OpenSky client_id: " V && aws ssm put-parameter --name /natbag/opensky/client_id --type SecureString --value "$V" && unset V; echo
+read -rsp "OpenSky client_secret: " V && aws ssm put-parameter --name /natbag/opensky/client_secret --type SecureString --value "$V" && unset V; echo
+```
+
+תוך עד 5 דקות השרת יתחיל להשתמש במפתח. בודקים בכתובת `ProxyUrl` + `opensky?lat=32.0055&lon=34.8854&dist=43`.
+
+## אחרי שמתג הכיבוי הופעל
+
+קודם בודקים ב-Billing מה גרם לעלות. אחר כך מפעילים מחדש:
+
+```bash
+aws lambda delete-function-concurrency --function-name natbag-proxy
+```
+
+## קו טלפוני למידע טיסות (טלפונים כשרים)
+
+בתחילת השיחה יש תפריט:
+- **1, נחיתות:** המטוסים שבגישה לנחיתה עכשיו, לפי ADS-B, עם זמן נחיתה משוער. אחריהם מוקראות הנחיתות הבאות מלוח הטיסות, בשעה הקרובה.
+- **2, המראות:** המטוסים שהמריאו בדקות האחרונות. אחריהם מוקראות ההמראות הבאות מלוח הטיסות.
+- **3, בירור טיסה לפי מספר.**
+
+ההקראה היא ארבעה משפטים בכל פעם: 1 להמשך, 2 מההתחלה עם נתונים מעודכנים, 3 לסיום.
+
+**בירור טיסה:** מקישים מספר טיסה (בספרות בלבד) ולוחצים סולמית. המערכת מקריאה:
+- מאיפה הטיסה מגיעה ומה הסטטוס שלה
+- שעת נחיתה מתוכננת, ושעה מעודכנת אם השתנתה
+- אם המטוס באוויר: המרחק מנמל התעופה, הכיוון, הגובה והערכה בעוד כמה דקות הוא ינחת
+
+אם יש כמה טיסות עם אותו מספר, המערכת מקריאה תפריט בחירה. יש אפשרות לשמיעה חוזרת או לבדיקת טיסה נוספת.
+
+**מקורות הנתונים:**
+- **לוח הטיסות הרשמי של רשות שדות התעופה** (data.gov.il): שעות וסטטוס.
+- **ADS-B** לפי callsign: מיקום חי.
+
+**התקנה:**
+1. **בדיקה בדפדפן:** פותחים את `ProxyUrl` + `flight?num=1`. צריך לחזור JSON עם `speech`.
+2. **סיסמה:** בפריסה מגדירים את `IvrToken`. ב-GitHub Actions מוסיפים Secret בשם `IVR_TOKEN`.
+3. **ימות המשיח:** פותחים מערכת ב[ימות המשיח](https://www.yemot.co.il). בשלוחה הרצויה, בקובץ `ext.ini`, מגדירים:
+   ```
+   type=api
+   api_link=https://<ProxyUrl>/ivr
+   api_add_0=token=<IVR_TOKEN>
+   api_hangup_send=no
+   voice=Sivan
+   ```
+   - **מצב מכשיר קשר:** מוסיפים `api_add_2=radio=1` לכל שלוחה, ומעלים לשלוחה הראשית את הקבצים `900.wav` (פתיח באנגלית בסגנון קשר מגדל-טייס), `901.wav` (פתיחת ערוץ) ו-`902.wav` (ביפ וסגירת ערוץ). כל הקראה מקבלת צלילי קשר בתחילתה ובסופה, והפתיח מושמע רק בתפריט הראשי. את הקבצים יוצרים מחדש עם `docs/radio/make-radio.sh`.
+   - **תפריט מוקלט:** `api_add_3=menufile=1` בשלוחה הראשית משמיע את הקובץ `910.wav` (פתיח ותפריט מוקלטים) במקום הקראת הטקסט. כל קובץ אחר שתעלו בשם 910 – למשל הקלטה בעברית – יחליף אותו.
+   - **קול ההקראה:** השורה `voice=` בוחרת את הקול. האפשרויות הן `Elik_2100` (ברירת המחדל), `Jacob`, `Sivan` ו-`Osnat`. את המהירות קובעים עם `rate=`, מ-‎-10 עד 10.
+   - **שלוחות נפרדות בימות המשיח:** כל שלוחה מקבלת את אותן שורות, ובנוסף שורת `api_add_1` משלה:
+     - **שלוחה ראשית:** `api_add_1=mode=root`. מקריאה תפריט ושולחת לשלוחה 1, 2 או 3. אפשר להוסיף פתיח משלך: `api_add_2=welcome=<הטקסט>`.
+     - **שלוחה 1:** `api_add_1=mode=arrivals`. נחיתות.
+     - **שלוחה 2:** `api_add_1=mode=departures`. המראות.
+     - **שלוחה 3:** `api_add_1=mode=flights`. בירור טיסה לפי מספר.
+     - **אפשרות נוספת:** `mode=planes` מקריא את כל כלי הטיס ברדיוס 100 ק"מ.
+
+השרת עצמו לא שומר מצב. ימות המשיח שולחת בכל בקשה את כל מה שהמתקשר הקיש עד אותו רגע (flight1, pick1, next1, flight2…).
+
+## התרעה טלפונית (natbag-watcher)
+
+הפונקציה רצה כל דקה. כשמדד החריגה עובר ל"חריגה משמעותית", היא מתקשרת אליך דרך ימות המשיח, לכל היותר פעם בחצי שעה. השיחות עולות **יחידות** בימות המשיח.
+
+1. **שמירת הפרטים ב-SSM** (ב-CloudShell; הערכים לא מוצגים על המסך ולא נשמרים בהיסטוריה):
+   ```bash
+   read -rsp "Yemot system number: " V && aws ssm put-parameter --name /natbag/yemot/username --type SecureString --value "$V" --overwrite && unset V; echo
+   read -rsp "Yemot password: " V && aws ssm put-parameter --name /natbag/yemot/password --type SecureString --value "$V" --overwrite && unset V; echo
+   read -rsp "Phone to call: " V && aws ssm put-parameter --name /natbag/yemot/phone --type SecureString --value "$V" --overwrite && unset V; echo
+   ```
+2. **שיחת בדיקה:**
+   ```bash
+   aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
+     --payload '{"testCall":true}' /tmp/out.json && cat /tmp/out.json
+   ```
+3. **מעקב:** הלוגים נמצאים ב-`/aws/lambda/natbag-watcher`, והגרף "מדד החריגה" בלוח הבקרה.
+
+## פריסה אוטומטית מ-GitHub (CI/CD)
+
+מגדירים פעם אחת, ומאז כל push ל-`main` מריץ בדיקות ופורס לבד.
+
+1. **יצירת תפקיד הפריסה:** ב-CloudShell מריצים (מחליפים את `ackerme` בשם המשתמש שלך ב-GitHub):
+   ```bash
+   git clone https://github.com/ackerme/natbag-monitor && cd natbag-monitor/natbag-aws
+   aws cloudformation deploy --template-file github-oidc.yaml --stack-name natbag-github-oidc \
+     --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubOwner=ackerme RepoName=natbag-monitor
+   aws cloudformation describe-stacks --stack-name natbag-github-oidc --query "Stacks[0].Outputs" --output table
+   ```
+   אם מופיעה שגיאה שה-OIDC provider כבר קיים, מוסיפים לפקודה `CreateOIDCProvider=false`.
+2. **הגדרות ב-GitHub:** ב-repo נכנסים ל-**Settings** ← **Secrets and variables** ← **Actions** ומוסיפים:
+   - בלשונית **Variables**: `AWS_DEPLOY_ROLE_ARN`, עם ה-`RoleArn` מהשלב הקודם.
+   - בלשונית **Secrets**: `ALERT_EMAIL`, עם כתובת המייל להתרעות התקציב.
+3. **בדיקה:** בלשונית **Actions** בוחרים **CI/CD** ← **Run workflow**.
+
+## סביבת בדיקה (staging)
+
+אותה תבנית בדיוק, עם `Stage=staging`. נפרס רק שרת הביניים, בשם `natbag-staging-proxy`, בלי תקציב, בלי ניטור ובלי התרעות.
+
+- **אוטומטית:** כל push לענף `dev` ב-GitHub נפרס ל-stack בשם `natbag-staging`.
+- **ידנית:**
+  ```bash
+  sam deploy --stack-name natbag-staging --resolve-s3 --capabilities CAPABILITY_IAM \
+    --parameter-overrides Stage=staging AlertEmail=you@example.com
+  ```
+- **בדף:** מדביקים את ה-`ProxyUrl` של staging ב-`STAGING_PROXY_URL` שב-`monitor.html`, ופותחים `monitor.html?env=staging`.
+- **מחיקה:** `sam delete --stack-name natbag-staging`.
+
+## עדכון והסרה
+
+```bash
+sam deploy                      # אחרי שינוי בקוד
+sam delete --stack-name natbag  # מוחק את כל המשאבים
+```
