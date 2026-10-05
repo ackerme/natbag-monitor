@@ -206,6 +206,24 @@ export function typeHe(t) {
 }
 
 // רשימת ADS-B → כלי הטיס שבאוויר ברדיוס, מהקרוב לרחוק, מוכנים להקראה
+// ───────── נחיתה / המראה לפי הרדאר בלבד ─────────
+// dist = ק"מ מנתב"ג, altM = גובה במטרים, rate = קצב טיפוס/ירידה ברגל לדקה (שלילי = יורד),
+// track = כיוון הטיסה, brg = הכיוון מהשדה אל המטוס. מחזיר 'arr' (נוחת), 'dep' (המריא) או null.
+const angDiff = (x, y) => { const d = Math.abs(((x - y) % 360 + 360) % 360); return d > 180 ? 360 - d : d; };
+export function classifyMove({ dist, altM, rate = 0, track = null, brg }) {
+  if (altM == null || dist == null) return null;
+  const toward = track != null && angDiff(track, (brg + 180) % 360) < 70;   // טס לכיוון השדה
+  const away = track != null && angDiff(track, brg) < 80;                   // טס הרחק מהשדה
+  // נחיתה
+  if (dist <= 40 && altM <= 2500 && rate <= -200) return 'arr';                       // גישה סופית/קרובה: נמוך ויורד ליד השדה
+  if (dist <= 25 && altM <= 1200 && rate <= 100 && toward) return 'arr';              // נמוך מאוד, ישר ולכיוון המסלול
+  if (dist <= 120 && altM <= 7000 && rate <= -500 && toward) return 'arr';            // בירידה מרחוק לכיוון השדה
+  // המראה
+  if (dist <= 40 && altM <= 3000 && rate >= 300) return 'dep';                        // מטפס נמוך ליד השדה
+  if (dist <= 120 && altM <= 9000 && rate >= 800 && away) return 'dep';               // מטפס ומתרחק
+  return null;
+}
+
 export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
   return (acList || [])
     .filter(a => a && a.lat != null && a.lon != null && a.alt_baro !== 'ground')
@@ -231,16 +249,11 @@ export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
       else if (rate > 300) phase = 'בטיפוס';
       else phase = 'בטיסה רגילה ולא בנחיתה';
       const model = kind === 'מסוק' || kind === 'מטוס קל' ? '' : typeHe(a.t);
-      // נוחת / ממריא: לפי כיוון הטיסה ביחס לשדה, גובה וקצב טיפוס/ירידה
       const brg = bearingTo(TLV.lat, TLV.lon, a.lat, a.lon);
-      const track = typeof a.track === 'number' ? a.track : null;
-      const ang = (x, y) => { const d = Math.abs(((x - y) % 360 + 360) % 360); return d > 180 ? 360 - d : d; };
-      const toward = track != null && ang(track, (brg + 180) % 360) < 60;      // טס לכיוון השדה
-      const away = track != null && ang(track, brg) < 70;                      // טס הרחק מהשדה
       const kmh = typeof a.gs === 'number' ? a.gs * 1.852 : null;
-      const move = (toward && altM != null && altM < 6000 && (rate < -200 || altM < 2500)) ? 'arr'
-                 : (away && rate > 200 && dist < 60 && altM != null && altM < 7000) ? 'dep' : null;
-      const eta = move === 'arr' && kmh > 100 ? Math.max(1, Math.round(dist / kmh * 60 + 3)) : null;   // + ~3 דק' לגישה הסופית
+      // נוחת / ממריא – רק לפי הרדאר (ADS-B), בלי לוח הטיסות. מסוקים, מטוסים קלים וצבאיים לא נספרים
+      const move = kind ? null : classifyMove({ dist, altM, rate, track: typeof a.track === 'number' ? a.track : null, brg });
+      const eta = move === 'arr' && kmh > 100 ? Math.max(1, Math.round(dist / kmh * 60 + (dist < 15 ? 1 : 3))) : null;   // + זמן לגישה הסופית
       return { name, model, dist, dir: dirName(brg), altM, phase, move, eta };
     })
     .filter(p => p.dist <= radiusKm)
@@ -290,25 +303,14 @@ export async function buildList(kind, deps, nowIl) {
       : `אין כרגע כלי טיס באוויר בטווח ${PLANES_RADIUS_KM} קילומטר מנמל התעופה`,
       ...live.map((p, i) => planeSentence(p, i + 1))];
   }
-  let board = null;
-  try { board = await deps.getBoard(); } catch (e) { deps.onError?.('board', e); }
-  if (!live && !board) return null;
+  if (!live) return null;                        // נחיתות/המראות – רק מהרדאר, בלי לוח הטיסות
   const arr = kind === 'arr';
-  const out = [];
-  if (live) {
-    const mv = live.filter(p => p.move === kind).sort((a, b) => arr ? (a.eta ?? 999) - (b.eta ?? 999) : a.dist - b.dist);
-    out.push(mv.length
-      ? (arr ? `יש כרגע ${mv.length === 1 ? 'מטוס אחד' : mv.length + ' מטוסים'} בגישה לנחיתה בנמל התעופה בן גוריון`
-             : `${mv.length === 1 ? 'מטוס אחד המריא' : mv.length + ' מטוסים המריאו'} בדקות האחרונות מנמל התעופה בן גוריון`)
-      : (arr ? 'אין כרגע מטוסים בגישה לנחיתה' : 'אין כרגע מטוסים שהמריאו בדקות האחרונות'));
-    mv.forEach((p, i) => out.push(arr ? liveArrSentence(p, i + 1) : liveDepSentence(p, i + 1)));
-  }
-  if (board) {
-    const next = nextFromBoard(board, arr ? 'A' : 'D', nowIl);
-    out.push(next.length ? (arr ? 'הנחיתות הבאות לפי לוח הטיסות' : 'ההמראות הבאות לפי לוח הטיסות')
-                         : (arr ? 'אין נחיתות נוספות מתוכננות בשעה הקרובה' : 'אין המראות נוספות מתוכננות בשעה הקרובה'));
-    next.forEach(f => out.push(boardSentence(f, nowIl)));
-  }
+  const mv = live.filter(p => p.move === kind).sort((a, b) => arr ? (a.eta ?? 999) - (b.eta ?? 999) : a.dist - b.dist);
+  const out = [mv.length
+    ? (arr ? `לפי הרדאר יש כרגע ${mv.length === 1 ? 'מטוס אחד' : mv.length + ' מטוסים'} בגישה לנחיתה בנמל התעופה בן גוריון`
+           : `לפי הרדאר ${mv.length === 1 ? 'מטוס אחד המריא' : mv.length + ' מטוסים המריאו'} בדקות האחרונות מנמל התעופה בן גוריון`)
+    : (arr ? 'לפי הרדאר אין כרגע מטוסים בגישה לנחיתה' : 'לפי הרדאר אין כרגע מטוסים שהמריאו בדקות האחרונות')];
+  mv.forEach((p, i) => out.push(arr ? liveArrSentence(p, i + 1) : liveDepSentence(p, i + 1)));
   return out;
 }
 
