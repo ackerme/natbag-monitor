@@ -339,8 +339,9 @@ async function handleList(params, deps, kind) {
 // הפתיח: ברירת מחדל, או טקסט משלך מהגדרות השלוחה הראשית בימות המשיח (api_add_2=welcome=...)
 export const DEFAULT_WELCOME = 'שלום והגעתם לקו מידע הטיסות של נמל התעופה בן גוריון';
 // api_add_3=menufile=1 → במקום הקראה, מושמע קובץ מוקלט 910 (פתיח + תפריט בקול "מכשיר קשר")
-export const MENU_FILE = 'f-/910';
-const mainMenu = params => params.menufile === '1' ? [MENU_FILE] : [String(params.welcome || '').trim() || DEFAULT_WELCOME,
+// menufile=<שם קובץ בשלוחה הראשית>, למשל menufile=000 (או 1 = הקובץ 910). נתיב יחסי – הקובץ בתיקייה שבה נמצאים
+const menuFile = v => (v === '1' ? 'f-910' : /^\d{1,4}$/.test(v || '') ? `f-${v}` : null);
+const mainMenu = params => menuFile(params.menufile) ? [menuFile(params.menufile)] : [String(params.welcome || '').trim() || DEFAULT_WELCOME,
   'לנחיתות הקישו 1', 'להמראות הקישו 2', 'לבירור טיסה לפי מספר הקישו 3'];
 // מה כל מקש בתפריט עושה
 const MENU_KIND = { '1': 'arr', '2': 'dep' };      // 3 = בירור טיסה
@@ -416,3 +417,4 @@ async function handleIvrCore(params, deps) {
   return read([...answer, 'לשמיעה חוזרת הקישו 1', 'לטיסה אחרת הקישו 2', 'לסיום הקישו 3'], `next${n}`,
     { max: 1, min: 1, sec: 8, allowed: '1.2.3' });
 }
+
