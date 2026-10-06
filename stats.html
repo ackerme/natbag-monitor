@@ -3,227 +3,269 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>סטטיסטיקה ומצב המערכת – מוניטור נתב"ג</title>
+<meta name="description" content="הנחיתות וההמראות בנתב&quot;ג לפי שעה, החברות הפעילות, וזמינות המערכת ב-30 הימים האחרונים">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#050814">
-<title>סטטיסטיקות ומצב המערכת – מוניטור נתב"ג</title>
-<meta name="description" content="סטטיסטיקה יומית של התנועה האווירית בנתב&quot;ג וזמינות המערכת">
+<meta name="theme-color" content="#29363d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#050814; --bg2:#0a1024; --card:#0d1530; --line:#1c2b55;
-  --text:#e3ebff; --muted:#8fa3cc; --green:#3dff8c; --blue:#5ab0ff; --amber:#ffb640; --red:#ff5a3c; --grey:#2a3557;
+  --scope:#29363d; --deep:#25313a; --panel:#313f47; --rule:#46565f; --grid:#3b4b54;
+  --ink:#e4e9eb; --dim:#9daab1; --faint:#71828b;
+  --amber:#e8b23a; --pale:#9fcbdc; --alarm:#e0533d; --good:#7fc29b;
+  --sans:'IBM Plex Sans Hebrew',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;line-height:1.55;overflow-x:hidden}
+html{scroll-padding-top:72px}
+body{background:var(--scope);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
 a{color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+@media (max-width:600px){.wrap{padding:0 16px}}
 
-/* ---------- NAV (משותף לכל הדפים) ---------- */
-.topnav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px max(16px,4vw);
-  background:#050814e6;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.topnav .brand{font-weight:800;text-decoration:none;margin-inline-end:auto;white-space:nowrap}
-.topnav .brand span{color:var(--green)}
-.topnav a.l{text-decoration:none;font-size:.88rem;color:var(--muted);padding:6px 10px;border-radius:8px;white-space:nowrap}
-.topnav a.l:hover{color:var(--text);background:var(--card)}
-.topnav a.l.on{color:var(--text);background:var(--card);border:1px solid var(--line)}
+.bar{position:sticky;top:0;z-index:20;background:var(--scope);border-bottom:1px solid var(--rule)}
+.bar .wrap{display:flex;align-items:center;gap:28px;height:56px}
+.brand{font-weight:700;text-decoration:none;font-size:1.05rem;white-space:nowrap}
+.bar nav{display:flex;gap:22px;margin-inline-start:auto;font-size:.95rem}
+.bar nav a{text-decoration:none;color:var(--dim);padding:4px 0;border-bottom:2px solid transparent;white-space:nowrap}
+.bar nav a:hover,.bar nav a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+.clock{font-family:var(--mono);font-size:.85rem;color:var(--dim);direction:ltr;white-space:nowrap}
+@media (max-width:820px){
+  .bar .wrap{height:auto;flex-wrap:wrap;gap:6px 18px;padding-block:10px}
+  .bar nav{order:3;width:100%;margin:0;overflow-x:auto;gap:18px}
+  .clock{margin-inline-start:auto}
+}
 
-main{max-width:1100px;margin:0 auto;padding:28px 16px 60px}
-h1{font-size:clamp(1.5rem,3.4vw,2.2rem);margin-bottom:4px}
-h2{font-size:1.25rem;margin:40px 0 12px;display:flex;align-items:center;gap:8px}
-.sub{color:var(--muted);font-size:.92rem}
-.note{color:var(--muted);font-size:.8rem;margin-top:8px}
+main.wrap{padding-top:40px;padding-bottom:64px}
+h1{font-size:clamp(1.8rem,3.6vw,2.6rem);line-height:1.15;font-weight:700}
+.sub{color:var(--dim);margin-top:6px}
+section{margin-top:56px}
+h2{font-size:1.3rem;font-weight:700;margin-bottom:14px}
+.err{border:1px solid var(--alarm);border-inline-start-width:4px;padding:10px 14px;margin-top:20px;display:none}
 
-/* status */
-.state{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem;padding:10px 18px;border-radius:40px;margin:18px 0 6px;border:1px solid}
-.state.ok{color:var(--green);background:#07231a;border-color:#1d5a3a}
-.state.down{color:var(--red);background:#2a0d08;border-color:#6a2414}
-.state.stale,.state.unknown{color:var(--amber);background:#2a1d06;border-color:#6a4a10}
-.state i{width:10px;height:10px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}
-.state.ok i{animation:blink 1.6s infinite}
-@keyframes blink{50%{opacity:.3}}
-
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-.card b{display:block;font-size:1.7rem;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
-.card span{font-size:.8rem;color:var(--muted)}
-.card small{display:block;font-size:.72rem;color:var(--muted);margin-top:2px}
-
-.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
-.uptime{display:flex;gap:3px;height:38px;align-items:stretch;direction:ltr}
-.uptime div{flex:1;border-radius:3px;background:var(--grey);min-width:4px}
-.uptime .g{background:var(--green)} .uptime .a{background:var(--amber)} .uptime .r{background:var(--red)}
-.uprow{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-top:6px;direction:ltr}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.75rem;color:var(--muted);margin-top:10px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-inline-end:5px;vertical-align:-1px}
+/* שורת מספרים: כמו הקריאות מתחת לסקופ */
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-top:28px}
+.readout div{padding:14px 16px 12px;border-inline-start:1px solid var(--rule)}
+.readout div:first-child{border-inline-start:0;padding-inline-start:0}
+.readout b{display:block;font-family:var(--mono);font-weight:500;font-size:1.75rem;line-height:1.2}
+.readout span{font-size:.85rem;color:var(--dim)}
+.readout small{display:block;font-size:.78rem;color:var(--faint)}
+.readout .arr b{color:var(--amber)} .readout .dep b{color:var(--pale)}
+.readout .wide{grid-column:1/-1;padding-inline-start:0}
 
 .chart{direction:ltr;width:100%}
-.chart svg{width:100%;height:auto;display:block}
-.two{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
-.bars .row{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:10px;margin:7px 0;font-size:.88rem}
-.bars .track{height:12px;background:#0a1024;border-radius:6px;overflow:hidden}
-.bars .fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--green));border-radius:6px}
-.bars .n{text-align:left;color:var(--muted);font-variant-numeric:tabular-nums}
-.events{list-style:none;font-size:.88rem}
-.events li{padding:6px 0;border-bottom:1px solid var(--line);display:flex;gap:10px}
-.events li:last-child{border:0}
-.events time{color:var(--muted);font-variant-numeric:tabular-nums}
-.empty{color:var(--muted);font-size:.9rem;padding:18px 4px;text-align:center}
-.err{background:#2a0d08;border:1px solid #6a2414;color:#ffb0a0;border-radius:10px;padding:12px 14px;margin-top:16px;display:none}
-footer{padding:22px 16px;text-align:center;font-size:.78rem;color:#5c6f99;border-top:1px solid var(--line)}
-@media (max-width:760px){ .two{grid-template-columns:1fr} .bars .row{grid-template-columns:96px 1fr 30px} .topnav .brand{width:100%} }
-@media (prefers-reduced-motion:reduce){ *{animation:none!important} }
+.chart svg{width:100%;height:auto;display:block;font-family:var(--mono)}
+.key{display:flex;gap:20px;flex-wrap:wrap;font-size:.85rem;color:var(--dim);margin-top:10px}
+.key i{display:inline-block;width:12px;height:12px;margin-inline-end:6px;vertical-align:-1px}
+.two{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:56px}
+@media (max-width:860px){.two{grid-template-columns:1fr;gap:0}}
+
+.bars .row{display:grid;grid-template-columns:130px 1fr 36px;align-items:center;gap:12px;padding:6px 0;font-size:.95rem}
+.bars .track{height:10px;background:var(--deep)}
+.bars .fill{height:100%;background:var(--ink)}
+.bars .n{text-align:left;font-family:var(--mono);color:var(--dim)}
+.events{list-style:none}
+.events li{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--rule)}
+.events time{font-family:var(--mono);color:var(--dim)}
+.events .unusual{color:var(--amber)} .events .major{color:var(--alarm)} .events .normal{color:var(--good)}
+.empty{color:var(--dim);padding:14px 0}
+
+.state{display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:700;margin-top:6px}
+.state i{width:12px;height:12px;flex-shrink:0;background:currentColor}
+.state.ok{color:var(--good)} .state.down{color:var(--alarm)} .state.stale,.state.unknown{color:var(--amber)}
+.uptime{display:flex;gap:3px;height:34px;direction:ltr;margin-top:24px}
+.uptime div{flex:1;background:var(--panel);min-width:4px}
+.uptime .g{background:var(--good)} .uptime .a{background:var(--amber)} .uptime .r{background:var(--alarm)}
+.uprow{display:flex;justify-content:space-between;font-size:.8rem;color:var(--dim);margin-top:6px;direction:ltr;font-family:var(--mono)}
+.note{color:var(--dim);font-size:.88rem;margin-top:28px;max-width:72ch}
+footer{border-top:1px solid var(--rule);padding:32px 0 44px;color:var(--dim);font-size:.9rem}
+footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+@media (max-width:640px){.bars .row{grid-template-columns:100px 1fr 30px}}
 </style>
 </head>
 <body>
 
-<nav class="topnav">
-  <a class="brand" href="index.html">✈ מוניטור <span>נתב"ג</span></a>
-  <a class="l" href="index.html">בית</a>
-  <a class="l" href="monitor.html">📡 רדאר</a>
-  <a class="l on" href="stats.html">📊 סטטיסטיקות</a>
-  <a class="l" href="stats.html#status">🟢 מצב המערכת</a>
-  <a class="l" href="index.html#phone">☎ קו טלפוני</a>
-  <a class="l" href="index.html#how">⚙ איך זה עובד</a>
-</nav>
-
-<main>
-  <h1>📊 סטטיסטיקות</h1>
-  <p class="sub" id="todayLbl">התנועה האווירית בנתב"ג היום · מתעדכן כל דקה</p>
-  <div class="err" id="err"></div>
-
-  <div class="cards" id="todayCards"></div>
-
-  <h2>🛬 נחיתות לפי שעה</h2>
-  <div class="panel">
-    <div class="chart" id="hourChart"></div>
-    <div class="legend"><span><i style="background:var(--blue)"></i>נחיתות היום</span><span><i style="background:var(--green)"></i>המראות היום</span><span><i style="background:var(--amber);height:3px"></i>ממוצע נחיתות בימים הקודמים</span></div>
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="index.html">מוניטור נתב"ג</a>
+    <nav aria-label="ניווט ראשי">
+      <a href="monitor.html">רדאר</a>
+      <a href="stats.html" aria-current="page">סטטיסטיקה</a>
+      <a href="#status">מצב המערכת</a>
+      <a href="index.html#phone">קו טלפוני</a>
+      <a href="https://github.com/ackerme/natbag-monitor">קוד מקור</a>
+    </nav>
+    <span class="clock" id="clock">--:--:--Z</span>
   </div>
+</header>
+
+<main class="wrap">
+  <h1>התנועה בנתב"ג היום</h1>
+  <p class="sub" id="todayLbl">נאסף כל דקה, גם כשהאתר סגור.</p>
+  <div class="err" id="err" role="alert"></div>
+
+  <div class="readout" id="todayCards" aria-live="polite"></div>
+
+  <section aria-labelledby="h-hours">
+    <h2 id="h-hours">נחיתות והמראות לפי שעה</h2>
+    <div class="chart" id="hourChart"></div>
+    <div class="key"><span><i style="background:var(--amber)"></i>נחיתות היום</span><span><i style="background:var(--pale)"></i>המראות היום</span><span><i style="background:var(--ink);height:2px;vertical-align:4px"></i>ממוצע הנחיתות בימים הקודמים</span></div>
+  </section>
 
   <div class="two">
-    <div>
-      <h2>📅 7 הימים האחרונים</h2>
-      <div class="panel"><div class="chart" id="weekChart"></div></div>
-    </div>
-    <div>
-      <h2>🏷 החברות הפעילות היום</h2>
-      <div class="panel bars" id="airlines"></div>
-    </div>
+    <section aria-labelledby="h-week">
+      <h2 id="h-week">7 הימים האחרונים</h2>
+      <div class="chart" id="weekChart"></div>
+    </section>
+    <section aria-labelledby="h-air">
+      <h2 id="h-air">החברות הפעילות היום</h2>
+      <div class="bars" id="airlines"></div>
+    </section>
   </div>
 
-  <h2>📡 מדד החריגה היום</h2>
-  <div class="panel"><ul class="events" id="events"></ul></div>
+  <section aria-labelledby="h-ev">
+    <h2 id="h-ev">מדד החריגה בתנועה היום</h2>
+    <ul class="events" id="events"></ul>
+  </section>
 
-  <h2 id="status">🟢 מצב המערכת</h2>
-  <p class="sub">בדיקת זמינות אוטומטית רצה כל 5 דקות מבחוץ, כמו משתמש: השרת, נתוני המטוסים והאתר.</p>
-  <div id="stateBox"></div>
-  <div class="cards" id="statusCards"></div>
-  <div class="panel" style="margin-top:14px">
+  <section id="status" aria-labelledby="h-status">
+    <h2 id="h-status">מצב המערכת</h2>
+    <p class="sub">בדיקה אוטומטית כל 5 דקות, מבחוץ, כמו משתמש: השרת, נתוני המטוסים והאתר.</p>
+    <div id="stateBox"></div>
+    <div class="readout" id="statusCards"></div>
     <div class="uptime" id="uptimeBars"></div>
-    <div class="uprow"><span id="upFrom"></span><span>זמינות יומית – 30 ימים</span><span>היום</span></div>
-    <div class="legend"><span><i style="background:var(--green)"></i>99.5% ומעלה</span><span><i style="background:var(--amber)"></i>95%–99.5%</span><span><i style="background:var(--red)"></i>פחות מ-95%</span><span><i style="background:var(--grey)"></i>אין נתונים</span></div>
-  </div>
-  <p class="note">"נחיתה" = מטוס נוסעים שזוהה בגישה סופית לנתב"ג; "המראה" = מטוס נוסעים שמטפס עד 25 ק"מ מהשדה. הנתונים מבוססים על שידורי ADS-B פומביים ולכן מקורבים. זה לא מקור רשמי.</p>
+    <div class="uprow"><span id="upFrom"></span><span>זמינות יומית, 30 ימים</span><span>היום</span></div>
+    <div class="key"><span><i style="background:var(--good)"></i>99.5% ומעלה</span><span><i style="background:var(--amber)"></i>95% עד 99.5%</span><span><i style="background:var(--alarm)"></i>פחות מ-95%</span><span><i style="background:var(--panel)"></i>אין נתונים</span></div>
+    <p class="note">נחיתה היא מטוס נוסעים שזוהה בגישה סופית לנתב"ג. המראה היא מטוס נוסעים שמטפס עד 25 ק"מ מהשדה. הנתונים מבוססים על שידורי ADS-B פומביים, ולכן הם מקורבים ואינם מקור רשמי.</p>
+  </section>
 </main>
 
-<footer>מוניטור נתב"ג · פרויקט אישי ללמידה · <a href="https://github.com/ackerme/natbag-monitor">קוד מקור</a></footer>
+<footer>
+  <div class="wrap">
+    <p>פרויקט אישי ללמידה. לא מערכת בטיחות ולא לשימוש מבצעי.</p>
+    <a href="https://github.com/ackerme/natbag-monitor">הקוד ב-GitHub</a>
+  </div>
+</footer>
 
 <script>
 const PROXY_URL = "https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = n => n == null ? '—' : Number(n).toLocaleString('he-IL');
+const fmt = n => n == null ? '–' : Number(n).toLocaleString('he-IL');
 const hhmm = t => new Date(t).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' });
 const dayName = d => new Date(d + 'T12:00:00Z').toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric', timeZone: 'UTC' });
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
-function card(value, label, small) { return `<div class="card"><b><bdi>${value}</bdi></b><span>${esc(label)}</span>${small ? `<small>${esc(small)}</small>` : ''}</div>`; }
+{ const ck = $('clock'); const t = () => { ck.textContent = new Date().toISOString().slice(11, 19) + 'Z'; }; t(); setInterval(t, 1000); }
 
-// גרף עמודות לפי שעה (SVG), עם קו ממוצע
+function cell(value, label, small, cls) {
+  return `<div${cls ? ` class="${cls}"` : ''}><b><bdi>${value}</bdi></b><span>${esc(label)}</span>${small ? `<small>${esc(small)}</small>` : ''}</div>`;
+}
+
+// עמודות לפי שעה: נחיתות (ענבר) ומעליהן המראות (תכלת), וקו הממוצע
 function hourChart(land, dep, avg) {
   const W = 960, H = 260, L = 34, B = 26, T = 10, max = Math.max(4, ...land.map((v, i) => v + (dep[i] || 0)), ...(avg || []));
   const bw = (W - L - 6) / 24, y = v => H - B - (v / max) * (H - B - T);
   let g = '';
   for (let k = 0; k <= 4; k++) { const v = Math.round(max * k / 4), yy = y(v);
-    g += `<line x1="${L}" x2="${W}" y1="${yy}" y2="${yy}" stroke="${css('--line')}"/><text x="${L - 6}" y="${yy + 4}" fill="${css('--muted')}" font-size="11" text-anchor="end">${v}</text>`; }
+    g += `<line x1="${L}" x2="${W}" y1="${yy}" y2="${yy}" stroke="${css('--grid')}"/><text x="${L - 6}" y="${yy + 4}" fill="${css('--dim')}" font-size="11" text-anchor="end">${v}</text>`; }
   for (let h = 0; h < 24; h++) {
     const x = L + h * bw + 3, w = bw - 6, l = land[h] || 0, d = dep[h] || 0;
-    if (l) g += `<rect x="${x}" y="${y(l)}" width="${w}" height="${y(0) - y(l)}" rx="3" fill="${css('--blue')}"><title>${h}:00 · ${l} נחיתות</title></rect>`;
-    if (d) g += `<rect x="${x}" y="${y(l + d)}" width="${w}" height="${y(0) - y(d)}" rx="3" fill="${css('--green')}" opacity=".75"><title>${h}:00 · ${d} המראות</title></rect>`;
-    if (h % 2 === 0) g += `<text x="${x + w / 2}" y="${H - 8}" fill="${css('--muted')}" font-size="11" text-anchor="middle">${String(h).padStart(2, '0')}</text>`;
+    if (l) g += `<rect x="${x}" y="${y(l)}" width="${w}" height="${y(0) - y(l)}" fill="${css('--amber')}"><title>${h}:00, ${l} נחיתות</title></rect>`;
+    if (d) g += `<rect x="${x}" y="${y(l + d)}" width="${w}" height="${y(0) - y(d)}" fill="${css('--pale')}"><title>${h}:00, ${d} המראות</title></rect>`;
+    if (h % 2 === 0) g += `<text x="${x + w / 2}" y="${H - 8}" fill="${css('--dim')}" font-size="11" text-anchor="middle">${String(h).padStart(2, '0')}</text>`;
   }
-  if (avg) g += `<polyline fill="none" stroke="${css('--amber')}" stroke-width="2.5" stroke-linejoin="round" points="${avg.map((v, h) => `${L + h * bw + bw / 2},${y(v)}`).join(' ')}"/>`;
+  if (avg) g += `<polyline fill="none" stroke="${css('--ink')}" stroke-width="2" stroke-linejoin="round" points="${avg.map((v, h) => `${L + h * bw + bw / 2},${y(v)}`).join(' ')}"/>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="נחיתות והמראות לפי שעה">${g}</svg>`;
 }
 
 function weekChart(week) {
-  const W = 520, H = 240, L = 30, B = 40, T = 26, max = Math.max(4, ...week.map(d => (d.landings || 0) + (d.departures || 0)));
+  const W = 560, H = 240, L = 30, B = 40, T = 26, max = Math.max(4, ...week.map(d => (d.landings || 0) + (d.departures || 0)));
   const bw = (W - L) / week.length, y = v => H - B - (v / max) * (H - B - T);
-  let g = '';
+  let g = `<line x1="${L}" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="${css('--rule')}"/>`;
   week.forEach((d, i) => {
-    const x = L + i * bw + 8, w = bw - 16, l = d.landings, dp = d.departures;
-    if (l == null) g += `<rect x="${x}" y="${y(max * 0.04)}" width="${w}" height="${y(0) - y(max * 0.04)}" rx="3" fill="${css('--grey')}"><title>${dayName(d.date)} · אין נתונים</title></rect>`;
+    const x = L + i * bw + 10, w = bw - 20, l = d.landings, dp = d.departures;
+    if (l == null) g += `<rect x="${x}" y="${y(max * 0.03)}" width="${w}" height="${y(0) - y(max * 0.03)}" fill="${css('--panel')}"><title>${dayName(d.date)}, אין נתונים</title></rect>`;
     else {
-      g += `<rect x="${x}" y="${y(l)}" width="${w}" height="${y(0) - y(l)}" rx="3" fill="${css('--blue')}"><title>${dayName(d.date)} · ${l} נחיתות</title></rect>`;
-      g += `<rect x="${x}" y="${y(l + dp)}" width="${w}" height="${y(0) - y(dp)}" rx="3" fill="${css('--green')}" opacity=".75"><title>${dayName(d.date)} · ${dp} המראות</title></rect>`;
-      g += `<text x="${x + w / 2}" y="${y(l + dp) - 5}" fill="${css('--text')}" font-size="12" text-anchor="middle">${l + dp}</text>`;
+      g += `<rect x="${x}" y="${y(l)}" width="${w}" height="${y(0) - y(l)}" fill="${css('--amber')}"><title>${dayName(d.date)}, ${l} נחיתות</title></rect>`;
+      g += `<rect x="${x}" y="${y(l + dp)}" width="${w}" height="${y(0) - y(dp)}" fill="${css('--pale')}"><title>${dayName(d.date)}, ${dp} המראות</title></rect>`;
+      g += `<text x="${x + w / 2}" y="${y(l + dp) - 6}" fill="${css('--ink')}" font-size="12" text-anchor="middle">${l + dp}</text>`;
     }
-    g += `<text x="${x + w / 2}" y="${H - 18}" fill="${css('--muted')}" font-size="11" text-anchor="middle">${esc(dayName(d.date))}</text>`;
+    g += `<text x="${x + w / 2}" y="${H - 16}" fill="${css('--dim')}" font-size="11" text-anchor="middle" font-family="IBM Plex Sans Hebrew,sans-serif">${esc(dayName(d.date))}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="נחיתות והמראות ב-7 הימים האחרונים">${g}</svg>`;
 }
 
 function render(s) {
   const t = s.today;
-  // היום
   if (t) {
     $('todayCards').innerHTML =
-      card(fmt(t.landings), 'נחיתות היום') + card(fmt(t.departures), 'המראות היום') +
-      card(t.busiestHour == null ? '—' : `${String(t.busiestHour).padStart(2, '0')}:00`, 'השעה העמוסה') +
-      card(fmt(t.maxAirborne), 'שיא מטוסי נוסעים באוויר') + card(fmt(t.alerts), 'התרעות סטייה') +
-      card(fmt(t.anomalyMinutes.unusual + t.anomalyMinutes.major), 'דקות חריגה', t.anomalyMinutes.major ? `מתוכן ${t.anomalyMinutes.major} משמעותיות` : '');
+      cell(fmt(t.landings), 'נחיתות', '', 'arr') + cell(fmt(t.departures), 'המראות', '', 'dep') +
+      cell(t.busiestHour == null ? '–' : `${String(t.busiestHour).padStart(2, '0')}:00`, 'השעה העמוסה') +
+      cell(fmt(t.maxAirborne), 'שיא מטוסי נוסעים באוויר') + cell(fmt(t.alerts), 'התרעות סטייה') +
+      cell(fmt(t.anomalyMinutes.unusual + t.anomalyMinutes.major), 'דקות חריגה', t.anomalyMinutes.major ? `מתוכן ${t.anomalyMinutes.major} משמעותיות` : '');
     $('hourChart').innerHTML = hourChart(t.landingsByHour, t.departuresByHour, s.avgLandingsByHour);
     const max = Math.max(1, ...t.topAirlines.map(a => a.count));
     $('airlines').innerHTML = t.topAirlines.length ? t.topAirlines.map(a =>
       `<div class="row"><span>${esc(a.name)}</span><div class="track"><div class="fill" style="width:${a.count / max * 100}%"></div></div><span class="n">${a.count}</span></div>`).join('')
-      : '<div class="empty">עוד אין נתונים להיום</div>';
-    const lab = { normal: '✅ חזר לשגרה', unusual: '⚠ חריגה', major: '🔶 חריגה משמעותית' };
-    $('events').innerHTML = t.events.length ? t.events.slice().reverse().map(e => `<li><time>${hhmm(e.t)}</time><span>${lab[e.level] || e.level}</span></li>`).join('')
-      : '<li class="empty" style="justify-content:center">✅ לא היו חריגות היום</li>';
+      : '<p class="empty">עוד אין נתונים להיום.</p>';
+    const lab = { normal: 'חזר לשגרה', unusual: 'חריגה', major: 'חריגה משמעותית' };
+    $('events').innerHTML = t.events.length ? t.events.slice().reverse().map(e => `<li><time>${hhmm(e.t)}</time><span class="${esc(e.level)}">${lab[e.level] || esc(e.level)}</span></li>`).join('')
+      : '<li class="empty">לא היו חריגות היום.</li>';
   } else {
-    $('todayCards').innerHTML = '<div class="card" style="grid-column:1/-1"><span>⏳ הנתונים של היום מתחילים להיאסף. בעוד כמה דקות יופיעו כאן.</span></div>';
-    $('hourChart').innerHTML = '<div class="empty">אין עדיין נתונים</div>';
-    $('airlines').innerHTML = '<div class="empty">אין עדיין נתונים</div>';
-    $('events').innerHTML = '<li class="empty" style="justify-content:center">אין עדיין נתונים</li>';
+    $('todayCards').innerHTML = '<div class="wide"><span>הנתונים של היום מתחילים להיאסף. בעוד כמה דקות יופיעו כאן.</span></div>';
+    $('hourChart').innerHTML = '<p class="empty">אין עדיין נתונים.</p>';
+    $('airlines').innerHTML = '<p class="empty">אין עדיין נתונים.</p>';
+    $('events').innerHTML = '<li class="empty">אין עדיין נתונים.</li>';
   }
   $('weekChart').innerHTML = weekChart(s.week);
 
-  // מצב המערכת
   const st = s.status, last = st.lastCheck;
   const stateTxt = { ok: 'כל המערכות פועלות', down: 'יש תקלה כרגע', stale: 'אין בדיקה עדכנית', unknown: 'עוד אין נתוני זמינות' }[st.state];
-  $('stateBox').innerHTML = `<div class="state ${st.state}"><i></i>${stateTxt}</div>`;
+  $('stateBox').innerHTML = `<p class="state ${st.state}"><i></i>${stateTxt}</p>`;
   const ago = last ? Math.max(0, Math.round((Date.now() - last.t) / 60e3)) : null;
   $('statusCards').innerHTML =
-    card(st.uptime30 == null ? '—' : st.uptime30 + '%', 'זמינות ב-30 ימים', st.checks30 ? `${fmt(st.checks30)} בדיקות` : '') +
-    card(st.uptimeToday == null ? '—' : st.uptimeToday + '%', 'זמינות היום') +
-    card(st.avgLatencyToday == null ? '—' : fmt(st.avgLatencyToday) + ' ms', 'זמן תגובה ממוצע היום') +
-    card(ago == null ? '—' : (ago === 0 ? 'עכשיו' : `לפני ${ago} דק'`), 'בדיקה אחרונה',
-         last ? (last.pass ? `עברה · ${last.ms} ms${last.source ? ' · מקור: ' + last.source : ''}` : `נכשלה: ${(last.failedChecks || []).join(', ')}`) : '');
+    cell(st.uptime30 == null ? '–' : st.uptime30 + '%', 'זמינות ב-30 ימים', st.checks30 ? `${fmt(st.checks30)} בדיקות` : '') +
+    cell(st.uptimeToday == null ? '–' : st.uptimeToday + '%', 'זמינות היום') +
+    cell(st.avgLatencyToday == null ? '–' : fmt(st.avgLatencyToday) + ' ms', 'זמן תגובה ממוצע היום') +
+    cell(ago == null ? '–' : (ago === 0 ? 'עכשיו' : `לפני ${ago} דק'`), 'בדיקה אחרונה',
+         last ? (last.pass ? `עברה, ${last.ms} ms${last.source ? ', מקור ' + last.source : ''}` : `נכשלה: ${(last.failedChecks || []).join(', ')}`) : '');
   $('uptimeBars').innerHTML = st.days.map(d => {
     const c = d.uptime == null ? '' : d.uptime >= 99.5 ? 'g' : d.uptime >= 95 ? 'a' : 'r';
-    return `<div class="${c}" title="${esc(dayName(d.date))} · ${d.uptime == null ? 'אין נתונים' : d.uptime + '%'}"></div>`;
+    return `<div class="${c}" title="${esc(dayName(d.date))}: ${d.uptime == null ? 'אין נתונים' : d.uptime + '%'}"></div>`;
   }).join('');
   $('upFrom').textContent = dayName(st.days[0].date);
-  $('todayLbl').textContent = `התנועה האווירית בנתב"ג היום · עודכן ${hhmm(s.generated)} · מתעדכן כל דקה`;
+  $('todayLbl').textContent = `עודכן ב-${hhmm(s.generated)}. נאסף כל דקה, גם כשהאתר סגור.`;
+}
+
+// ?demo – נתוני דוגמה לבדיקה בלי חיבור לשרת
+function demoData() {
+  const now = Date.now(), days = n => Array.from({ length: n }, (_, i) => new Date(now - (n - 1 - i) * 864e5).toISOString().slice(0, 10));
+  const land = [0,0,1,2,1,0,2,4,5,6,4,5,6,7,5,6,5,4,6,7,5,0,0,0], dep = [1,0,0,1,2,3,5,4,3,4,5,4,5,4,6,5,4,5,3,4,2,0,0,0];
+  return { generated: now, avgLandingsByHour: land.map(v => Math.max(0, v - 1 + (v % 2))),
+    today: { landings: 81, departures: 70, busiestHour: 19, maxAirborne: 14, alerts: 1, anomalyMinutes: { unusual: 6, major: 0 },
+      landingsByHour: land, departuresByHour: dep,
+      topAirlines: [{ name: 'אל על', count: 31 }, { name: 'ישראייר', count: 14 }, { name: 'ארקיע', count: 11 }, { name: 'וויז אייר', count: 9 }, { name: 'טורקיש', count: 6 }, { name: 'אמירייטס', count: 4 }],
+      events: [{ t: now - 5 * 36e5, level: 'unusual' }, { t: now - 4.9 * 36e5, level: 'normal' }] },
+    week: days(7).map((d, i) => i < 2 ? { date: d, landings: null, departures: null } : { date: d, landings: 70 + i * 3, departures: 64 + i * 2 }),
+    status: { state: 'ok', uptime30: 99.86, uptimeToday: 100, checks30: 2304, avgLatencyToday: 412,
+      lastCheck: { t: now - 2 * 60e3, pass: true, ms: 380, source: 'adsb.lol' },
+      days: days(30).map((d, i) => ({ date: d, uptime: i < 21 ? null : i === 25 ? 98.6 : 100 })) } };
 }
 
 async function load() {
+  if (location.search.includes('demo')) { render(demoData()); return; }
   try {
     const r = await fetch(PROXY_URL.replace(/\/+$/, '') + '/stats', { signal: AbortSignal.timeout(10000) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
     render(await r.json());
     $('err').style.display = 'none';
   } catch (e) {
-    $('err').textContent = '⚠ לא הצלחנו לטעון את הסטטיסטיקה: ' + e.message;
+    $('err').textContent = 'הסטטיסטיקה לא נטענה (' + e.message + '). מנסים שוב בעוד דקה.';
     $('err').style.display = 'block';
   }
 }
