@@ -146,8 +146,12 @@ export function flightAnswer(f, ac, nowIl) {
 // פריט שמתחיל ב-f- הוא קובץ שמע שהועלה לימות המשיח (מושמע כמו שהוא), כל השאר טקסט להקראה
 const msg = arr => arr.map(t => (/^f-\/?\d+$/.test(t) ? t : 't-' + say(t))).filter(x => x.length > 2).join('.');
 // read=<הודעות>=<משתנה>,<להקיש מחדש אם קיים>,<מקס ספרות>,<מינ ספרות>,<שניות המתנה>,<השמעת הקשה>,<חסימת כוכבית>,<חסימת 0>,<החלפת תו>,<ספרות מותרות>
+// הקשה ריקה (סולמית לבד) מתקבלת כ-HASH, וחוזרים איתה לתפריט הראשי
 const read = (texts, name, { max = 5, min = 1, sec = 10, allowed = '' } = {}) =>
-  `read=${msg(texts)}=${name},yes,${max},${min},${sec},No,yes,no,,${allowed},,,,`;
+  `read=${msg(texts)}=${name},yes,${max},${min},${sec},No,yes,no,,${allowed},,Ok,HASH,`;
+export const BACK_KEY_TEXT = 'לחזרה לתפריט הראשי הקישו סולמית';
+const isBack = v => v === '' || v === 'HASH';
+const TO_MAIN = 'go_to_folder=/';
 const idList = texts => `id_list_message=${msg(texts)}&`;
 const HANGUP = 'go_to_folder=hangup';
 
@@ -241,26 +245,50 @@ export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
       else if (/^4X[A-Z]{3}$/.test(cs)) name = 'מטוס פרטי ישראלי';
       else if (m) name = `מטוס של חברה זרה טיסה ${parseInt(m[2], 10)}`;
       else name = 'מטוס';
-      // האם בנחיתה – תמיד אומרים במפורש
-      let phase;
-      if (rate < -300 && dist < 60 && altM != null && altM < 3500) phase = 'בגישה לנחיתה בנמל התעופה';
-      else if (rate < -300) phase = 'בירידה';
-      else if (rate > 300 && dist < 40 && altM != null && altM < 4000) phase = 'בטיפוס אחרי המראה';
-      else if (rate > 300) phase = 'בטיפוס';
-      else phase = 'בטיסה רגילה ולא בנחיתה';
       const model = kind === 'מסוק' || kind === 'מטוס קל' ? '' : typeHe(a.t);
       const brg = bearingTo(TLV.lat, TLV.lon, a.lat, a.lon);
       const kmh = typeof a.gs === 'number' ? a.gs * 1.852 : null;
       // נוחת / ממריא – רק לפי הרדאר (ADS-B), בלי לוח הטיסות. מסוקים, מטוסים קלים וצבאיים לא נספרים
       const move = kind ? null : classifyMove({ dist, altM, rate, track: typeof a.track === 'number' ? a.track : null, brg });
       const eta = move === 'arr' && kmh > 100 ? Math.max(1, Math.round(dist / kmh * 60 + (dist < 15 ? 1 : 3))) : null;   // + זמן לגישה הסופית
-      return { name, model, dist, dir: dirName(brg), altM, phase, move, eta };
+      // מה המטוס עושה – אותו סיווג כמו בשלוחות הנחיתות וההמראות
+      const phase = move === 'arr' ? 'בגישה לנחיתה בנמל התעופה'
+                  : move === 'dep' ? 'אחרי המראה מנמל התעופה'
+                  : altM != null && altM >= 7000 ? 'חולף באזור בגובה שיוט'
+                  : rate < -300 ? 'בירידה' : rate > 300 ? 'בטיפוס' : 'בטיסה באזור';
+      return { name, model, dist, dir: dirName(brg), altM, phase, move, eta, cs };
     })
     .filter(p => p.dist <= radiusKm)
     .sort((a, b) => a.dist - b.dist);
 }
+// ───────── מאיפה / לאן: לפי לוח הטיסות של רשות שדות התעופה ─────────
+// ADS-B לא כולל מסלול, אז מחברים את אות הקריאה של המטוס לטיסה בלוח (ELY027 ↔ LY 27).
+// הלוח לא קובע מי נוחת ומי ממריא – רק מוסיף את העיר.
+export function routeIndex(board, nowIl) {
+  const idx = {};
+  for (const f of board || []) {
+    if (!f.icao || !f.cityHe || (f.dir !== 'A' && f.dir !== 'D')) continue;
+    const t = localMs(f.est || f.sched);
+    if (!isNaN(t) && (t < nowIl - 8 * 36e5 || t > nowIl + 12 * 36e5)) continue;
+    for (const cs of callsignCandidates(f)) {
+      const k = `${cs}|${f.dir}`, prev = idx[k];
+      if (!prev || Math.abs((t || nowIl) - nowIl) < Math.abs((prev.t || nowIl) - nowIl))
+        idx[k] = { dir: f.dir, city: f.cityHe, flight: `${f.iata} ${f.digits}`, airline: f.airlineHe, t };
+    }
+  }
+  return idx;
+}
+// העיר של מטוס: קודם לפי מה שהרדאר זיהה (נוחת → מאיפה, ממריא → לאן), אחרת מה שיש בלוח
+export function routeFor(idx, cs, move) {
+  if (!idx || !cs) return null;
+  const k = String(cs).trim().toUpperCase();
+  const a = idx[`${k}|A`], d = idx[`${k}|D`];
+  return move === 'dep' ? (d || null) : move === 'arr' ? (a || null) : (a || d || null);
+}
+const fromTo = r => (r ? ` ${r.dir === 'A' ? 'מ' : 'ל'}${/^[A-Za-z0-9]/.test(r.city) ? '-' : ''}${r.city}` : '');
+
 export function planeSentence(p, i) {
-  return say(`מספר ${i} ${p.name}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
+  return say(`מספר ${i} ${p.name}${fromTo(p.route)}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
              `${p.altM ? ` בגובה ${p.altM} מטר` : ''}${p.phase ? ` ${p.phase}` : ''}`);
 }
 
@@ -281,11 +309,11 @@ export function boardSentence(f, nowIl) {
              `${f.statusHe ? ` סטטוס ${f.statusHe}` : ''}`);
 }
 function liveArrSentence(p, i) {
-  return say(`מספר ${i} ${p.name}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
+  return say(`מספר ${i} ${p.name}${fromTo(p.route)}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
              `${p.altM ? ` בגובה ${p.altM} מטר` : ''}${p.eta ? ` נחיתה בעוד כ ${p.eta} דקות` : ''}`);
 }
 function liveDepSentence(p, i) {
-  return say(`מספר ${i} ${p.name}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
+  return say(`מספר ${i} ${p.name}${fromTo(p.route)}${p.model ? ` ${p.model}` : ''} במרחק ${Math.round(p.dist)} קילומטר ${p.dir} לנמל התעופה` +
              `${p.altM ? ` בגובה ${p.altM} מטר` : ''} ובטיפוס`);
 }
 
@@ -296,11 +324,17 @@ function liveDepSentence(p, i) {
 export async function buildList(kind, deps, nowIl) {
   let live = null;
   try { live = planesNear(await deps.getNear()); } catch (e) { deps.onError?.('planes', e); }
+  // מאיפה / לאן – אם לוח הטיסות לא זמין, פשוט בלי עיר
+  if (live && live.length) {
+    let idx = null;
+    try { idx = routeIndex(await deps.getBoard(), nowIl); } catch (e) { deps.onError?.('board', e); }
+    for (const p of live) p.route = routeFor(idx, p.cs, p.move);
+  }
   if (kind === 'all') {
     if (!live) return null;
     return [live.length
-      ? `בטווח ${PLANES_RADIUS_KM} קילומטר מנמל התעופה בן גוריון יש כרגע ${live.length === 1 ? 'כלי טיס אחד' : live.length + ' כלי טיס'} באוויר`
-      : `אין כרגע כלי טיס באוויר בטווח ${PLANES_RADIUS_KM} קילומטר מנמל התעופה`,
+      ? `ברגע זה יש באוויר ${live.length === 1 ? 'כלי טיס אחד' : live.length + ' כלי טיס'} בטווח ${PLANES_RADIUS_KM} קילומטר מנמל התעופה בן גוריון, מהקרוב לרחוק`
+      : `ברגע זה אין כלי טיס באוויר בטווח ${PLANES_RADIUS_KM} קילומטר מנמל התעופה`,
       ...live.map((p, i) => planeSentence(p, i + 1))];
   }
   if (!live) return null;                        // נחיתות/המראות – רק מהרדאר, בלי לוח הטיסות
@@ -325,6 +359,7 @@ async function handleList(params, deps, kind) {
   let offset = 0;
   if (seq >= 0) {
     const choice = lastVal(params[`p${seq}o${prevOff}`]);
+    if (isBack(choice)) return TO_MAIN;
     if (choice === '3') return idList(['תודה ולהתראות']) + HANGUP;
     if (choice === '1') offset = prevOff + PAGE_LINES;
   }
@@ -334,7 +369,7 @@ async function handleList(params, deps, kind) {
   const more = offset + PAGE_LINES < lines.length;
   if (more) texts.push('להמשך הקישו 1');
   else texts.push(kind === 'all' ? 'אלו כל כלי הטיס' : 'זה הכול');
-  texts.push('לשמיעה מההתחלה עם נתונים מעודכנים הקישו 2', 'לסיום הקישו 3');
+  texts.push('לשמיעה מההתחלה עם נתונים מעודכנים הקישו 2', 'לסיום הקישו 3', BACK_KEY_TEXT);
   return read(texts, `p${seq + 1}o${offset}`, { max: 1, min: 1, sec: 10, allowed: more ? '1.2.3' : '2.3' });
 }
 
@@ -344,9 +379,9 @@ export const DEFAULT_WELCOME = 'שלום והגעתם לקו מידע הטיסו
 // menufile=<שם קובץ בשלוחה הראשית>, למשל menufile=000 (או 1 = הקובץ 910). נתיב יחסי – הקובץ בתיקייה שבה נמצאים
 const menuFile = v => (v === '1' ? 'f-910' : /^\d{1,4}$/.test(v || '') ? `f-${v}` : null);
 const mainMenu = params => menuFile(params.menufile) ? [menuFile(params.menufile)] : [String(params.welcome || '').trim() || DEFAULT_WELCOME,
-  'לנחיתות הקישו 1', 'להמראות הקישו 2', 'לבירור טיסה לפי מספר הקישו 3'];
+  'לנחיתות הקישו 1', 'להמראות הקישו 2', 'לכל המטוסים שבאוויר עכשיו הקישו 3', 'לבירור טיסה לפי מספר הקישו 4', BACK_KEY_TEXT.replace('לחזרה', 'בכל שלב, לחזרה')];
 // מה כל מקש בתפריט עושה
-const MENU_KIND = { '1': 'arr', '2': 'dep' };      // 3 = בירור טיסה
+const MENU_KIND = { '1': 'arr', '2': 'dep', '3': 'all' };      // 4 = בירור טיסה
 const MODE_KIND = { arrivals: 'arr', departures: 'dep', planes: 'all' };
 
 // ───────── "מכשיר קשר": צלילי פתיחת ערוץ וביפ סיום סביב כל הקראה ─────────
@@ -372,23 +407,26 @@ async function handleIvrCore(params, deps) {
   const menu = lastVal(params.menu);
   // שלוחה ראשית בימות המשיח (api_add_1=mode=root): מקריאים תפריט ושולחים לשלוחה 1 או 2 של ימות המשיח
   if (params.mode === 'root') {
-    if (['1', '2', '3'].includes(menu)) return `go_to_folder=/${menu}`;
-    return read(mainMenu(params), 'menu', { max: 1, min: 1, sec: 10, allowed: '1.2.3' });
+    if (['1', '2', '3', '4'].includes(menu)) return `go_to_folder=/${menu}`;
+    return read(mainMenu(params), 'menu', { max: 1, min: 1, sec: 10, allowed: '1.2.3.4' });
   }
-  // 1 = נחיתות, 2 = המראות, 3 = בירור טיסה לפי מספר
+  // 1 = נחיתות, 2 = המראות, 3 = כל המטוסים באוויר, 4 = בירור טיסה לפי מספר
   const kind = MODE_KIND[params.mode] || (params.mode == null ? MENU_KIND[menu] : undefined);
   if (kind && params.flight1 == null) return handleList(params, deps, kind);
   if (params.mode == null && menu == null && params.flight1 == null)
-    return read(mainMenu(params), 'menu', { max: 1, min: 1, sec: 10, allowed: '1.2.3' });
+    return read(mainMenu(params), 'menu', { max: 1, min: 1, sec: 10, allowed: '1.2.3.4' });
+  if (params.mode == null && isBack(lastVal(params.menu))) return read(mainMenu(params), 'menu', { max: 1, min: 1, sec: 10, allowed: '1.2.3.4' });
 
   const nowIl = israelNowMs(deps.now);
   let n = 0;
   while (params[`flight${n + 1}`] != null) n++;
-  const WELCOME = ['הקישו את מספר הטיסה בספרות בלבד ובסיום הקישו סולמית'];
+  const WELCOME = ['הקישו את מספר הטיסה בספרות בלבד ובסיום הקישו סולמית', 'לחזרה לתפריט הראשי הקישו סולמית בלבד'];
   if (n === 0) return read(WELCOME, 'flight1');
 
-  const askAgain = extra => read([...extra, 'לבדיקת טיסה נוספת הקישו את מספר הטיסה ובסיום סולמית'], `flight${n + 1}`);
-  const digits = lastVal(params[`flight${n}`]).replace(/\D/g, '');
+  const askAgain = extra => read([...extra, 'לבדיקת טיסה נוספת הקישו את מספר הטיסה ובסיום סולמית', 'לחזרה לתפריט הראשי הקישו סולמית בלבד'], `flight${n + 1}`);
+  const rawFlight = lastVal(params[`flight${n}`]);
+  if (isBack(rawFlight)) return TO_MAIN;
+  const digits = rawFlight.replace(/\D/g, '');
 
   let board;
   try { board = await deps.getBoard(); }
@@ -400,6 +438,7 @@ async function handleIvrCore(params, deps) {
   let f = matches[0];
   if (matches.length > 1) {
     const pick = lastVal(params[`pick${n}`]);
+    if (isBack(pick)) return TO_MAIN;
     const idx = pick ? parseInt(pick, 10) - 1 : -1;
     if (!(idx >= 0 && idx < matches.length)) {
       const opts = matches.map((m, i) => `ל${m.dir === 'D' ? 'טיסה היוצאת' : 'טיסה הנוחתת'} של ${m.airlineHe} ${m.dir === 'D' ? 'ל' : 'מ'}${m.cityHe} הקישו ${i + 1}`);
@@ -410,13 +449,13 @@ async function handleIvrCore(params, deps) {
   }
 
   const nextVal = lastVal(params[`next${n}`]);
+  if (isBack(nextVal)) return TO_MAIN;
   if (nextVal === '2') return read(['הקישו את מספר הטיסה ובסיום סולמית'], `flight${n + 1}`);
   if (nextVal && nextVal !== '1') return idList(['תודה ולהתראות']) + HANGUP;
 
   let ac = null;
   try { ac = await deps.getLive(f); } catch { ac = null; }
   const answer = flightAnswer(f, ac, nowIl);
-  return read([...answer, 'לשמיעה חוזרת הקישו 1', 'לטיסה אחרת הקישו 2', 'לסיום הקישו 3'], `next${n}`,
+  return read([...answer, 'לשמיעה חוזרת הקישו 1', 'לטיסה אחרת הקישו 2', 'לסיום הקישו 3', BACK_KEY_TEXT], `next${n}`,
     { max: 1, min: 1, sec: 8, allowed: '1.2.3' });
 }
-
