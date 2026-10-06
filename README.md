@@ -122,13 +122,15 @@ flowchart LR
 - **4, בירור טיסה לפי מספר:** סטטוס, שעה מתוכננת ומעודכנת מלוח הטיסות, ואם המטוס באוויר גם המרחק שלו מהשדה.
 - **סולמית** בכל שלב מחזירה לתפריט הראשי.
 
+בנחיתות נאמר מאיפה הטיסה, ובהמראות לאן. ADS-B לא כולל מסלול, אז השרת מחבר את אות הקריאה של המטוס לטיסה בלוח של רשות שדות התעופה (למשל ELY027 ל-LY 27). הלוח רק מוסיף את העיר; מי נוחת ומי ממריא נקבע לפי הרדאר. באתר מופיעים המוצא והיעד ברשימת המטוסים, בחלון של כל טיסה ובהתרעת הסטייה (נקודת קצה `/routes`).
+
 הנתונים מגיעים מלוח הטיסות של רשות שדות התעופה (data.gov.il) ומ-ADS-B. הקוד נמצא ב-`natbag-aws/src/proxy/flights.mjs`, וההוראות ב-[natbag-aws/README.md](natbag-aws/README.md).
 
 ## CI/CD
 
 ```mermaid
 flowchart LR
-    D[git push] --> T[GitHub Actions<br/>npm test · 83 בדיקות]
+    D[git push] --> T[GitHub Actions<br/>npm test · 85 בדיקות]
     T -->|ענף dev| SO[OIDC → AWS] --> SS[sam deploy<br/>natbag-staging] --> SH[Smoke test<br/>stage=staging]
     T -->|ענף main| PO[OIDC → AWS] --> PS[sam deploy<br/>natbag] --> PH[Smoke test]
     SH -.->|Pull Request dev → main| T
@@ -146,7 +148,7 @@ flowchart LR
 
 ההבדל נקבע בפרמטר `Stage` ב-`template.yaml` ובתנאי `IsProd`. ב-staging לא נשלחים מדדים ואין התרעות, כדי להישאר ב-Free Tier ולא לקבל מיילים על סביבת בדיקה.
 
-- **בדיקות** (`tests/`): 83 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
+- **בדיקות** (`tests/`): 85 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
   - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
   - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
 - **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
