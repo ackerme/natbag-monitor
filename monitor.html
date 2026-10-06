@@ -146,7 +146,14 @@ header h1 a{text-decoration:none;color:inherit}
 #airAlert.major{border-inline-start-color:var(--alarm)}
 #airAlert.normal{border-inline-start-color:#7fc29b}
 #tkAlert.calm{border-inline-start-color:var(--rule)}
-.aa-ic{display:none}
+.aa-ic{width:30px;height:30px;flex-shrink:0;color:var(--amber);margin-top:2px}
+.aa-ic svg{width:100%;height:100%;display:block}
+#airAlert.major .aa-ic{color:var(--alarm)} #airAlert.normal .aa-ic{color:#7fc29b}
+#tkAlert .aa-ic{color:var(--tank)} #tkAlert.calm .aa-ic{color:var(--dim)} #mtAlert .aa-ic{color:var(--pale)}
+#ab .ab-hd{display:flex;align-items:center;gap:10px}
+#ab .ab-hd .aa-ic{color:var(--alarm)}
+.pc .rt{font-size:.85rem;margin-top:2px}
+#det .gr b.city{font-family:var(--sans);font-weight:700}
 .aa-tx{flex:1;min-width:0;font-size:.88rem;line-height:1.5}
 .aa-tx b{display:block;font-size:1rem;margin-bottom:2px}
 .aa-tx small{color:var(--dim);font-size:.74rem}
@@ -241,19 +248,19 @@ header h1 a{text-decoration:none;color:inherit}
 </div>
 
 <div id="airAlert" role="alert" aria-live="assertive">
-  <div class="aa-ic"></div>
+  <div class="aa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12 L18.4 5.6"/><circle cx="16" cy="9" r="1.2" fill="currentColor"/></svg></div>
   <div class="aa-tx"><b id="aaTitle"></b><div id="aaReasons"></div><small><span id="aaTime"></span>. התרעת תנועה אווירית, לא התרעת פיקוד העורף.</small></div>
   <div class="aa-act"><button id="aaClose" title="סגור">סגור</button><button id="aaMute" title="השתק צליל">השתק</button><button id="aaMore" title="פרטים">פרטים</button></div>
 </div>
 
 <div id="tkAlert" role="alert" aria-live="assertive">
-  <div class="aa-ic"></div>
+  <div class="aa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 11h7l4-6h2l-2 6h5a2 2 0 0 1 0 4h-5l2 6h-2l-4-6H3l-1-2z"/><path d="M5 17c0 1.4-1 2-1 3a1 1 0 0 0 2 0c0-1-1-1.6-1-3z" fill="currentColor"/></svg></div>
   <div class="aa-tx"><b id="tkTitle"></b><div id="tkList"></div><small><span id="tkTime"></span>. לפי שידורי ADS-B פומביים, לא מעיד בהכרח על אירוע.</small></div>
   <div class="aa-act"><button id="tkClose" title="סגור">סגור</button><button id="tkMute" title="השתק צליל">השתק</button></div>
 </div>
 
 <div id="mtAlert" role="alert" aria-live="assertive">
-  <div class="aa-ic"></div>
+  <div class="aa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
   <div class="aa-tx"><b id="mtTitle"></b><div id="mtList"></div><small><span id="mtTime"></span>. לפי רשימת Most tracked של Flightradar24 (מקור לא רשמי, לשימוש לימודי). לא מעיד בהכרח על אירוע.</small></div>
   <div class="aa-act"><button id="mtClose" title="סגור">סגור</button><button id="mtMute" title="השתק צליל">השתק</button></div>
 </div>
@@ -267,7 +274,7 @@ header h1 a{text-decoration:none;color:inherit}
 </nav>
 
 <div id="ab">
-  <h2>סטייה בגישה הסופית</h2>
+  <div class="ab-hd"><div class="aa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9.5v5" stroke-linecap="round"/><circle cx="12" cy="17.3" r=".9" fill="currentColor"/></svg></div><h2>סטייה בגישה הסופית</h2></div>
   <div id="acs"></div>
   <div class="aeta" id="aeta">-- דק'</div>
   <div class="ainf" id="ainf"></div>
@@ -804,6 +811,7 @@ function showAlert(p){
   document.getElementById('ab').style.display='block';
   clearTimeout(alertHide); alertHide=setTimeout(()=>document.getElementById('ab').style.display='none',12000);
   document.getElementById('acs').textContent=`${p.callsign||p.icao24}`;
+  const rtA=routeOf(p); if(rtA) document.getElementById('acs').textContent+=`, ${routeTxt(rtA)}`;
   document.getElementById('aeta').textContent=p.eta?`${p.eta} דק'`:"-- דק'";
   document.getElementById('ainf').innerHTML=`מרחק: ${p.dist.toFixed(1)} ק"מ | סטייה: ${p.dev.toFixed(0)}° | גובה: ${p.alt?Math.round(p.alt)+'מ':'--'}`;
   const tb=document.getElementById('atr');
@@ -815,6 +823,7 @@ function renderList(planes){
   document.getElementById('plist').innerHTML=planes.slice(0,25).map(p=>{ const al=airlineOf(p.callsign); return `
     <div class="pc${p.isAlert?' al':''}${p.icao24===selectedId?' sel':''}" data-id="${esc(p.icao24)}">
       <div class="cs">${esc(p.callsign||p.icao24)}</div>
+      ${routeOf(p)?`<div class="rt">${esc(routeTxt(routeOf(p)))}</div>`:''}
       ${(al||p.type)?`<div class="al-row">${logoImg(al,'')}${al?`<span>${esc(al.name)}</span>`:''}${p.type?`<span class="typ">${esc(typeName(p.type))}</span>`:''}</div>`:''}
       <div class="mt">${p.dist.toFixed(1)} ק"מ, ${p.alt?Math.round(p.alt).toLocaleString('he-IL')+' מ\'':'--'}, ${p.speed?Math.round(p.speed)+' קמ"ש':'--'}</div>
       ${p.cls&&p.cls!=='passenger'?`<span class="kind${p.cls==='tanker'?' tk':''}">${KIND_LABEL[p.cls]||''}${p.cls==='tanker'&&p.country?`, ${p.country==='US'?'ארה"ב':'ישראל'}`:''}</span>`:''}
@@ -828,6 +837,24 @@ function renderList(planes){
       <div class="cb"><span class="${p.c1?'m':''}">מרחק</span><span class="${p.c2?'m':''}">גובה</span><span class="${p.c3?'m':''}">ירידה</span></div>`:''}
     </div>`; }).join('');
 }
+
+// ===================== מאיפה / לאן =====================
+// ADS-B לא כולל מסלול. השרת מחבר אות קריאה לטיסה בלוח של רשות שדות התעופה (/routes).
+let routes={};
+const DEMO_ROUTES={'ELY001|A':{dir:'A',city:'ניו יורק',flight:'LY 1'},'THY794|A':{dir:'A',city:'איסטנבול',flight:'TK 794'},'UAE931|D':{dir:'D',city:'דובאי',flight:'EK 932'},
+  'RYR4521|A':{dir:'A',city:'פאפוס',flight:'FR 4521'},'WZZ2231|D':{dir:'D',city:'בודפשט',flight:'W6 2232'},'ISR722|A':{dir:'A',city:'אתונה',flight:'6H 722'},
+  'AIZ123|D':{dir:'D',city:'אילת',flight:'IZ 123'},'DLH686|A':{dir:'A',city:'פרנקפורט',flight:'LH 686'},'BAW165|A':{dir:'A',city:'לונדון',flight:'BA 165'},'AFR1620|A':{dir:'A',city:'פריז',flight:'AF 1620'}};
+async function fetchRoutes(){
+  if(demoMode) return;
+  try{ const r=await fetch(PROXY_URL.replace(/\/+$/,'')+'/routes',{signal:AbortSignal.timeout(10000)}); if(!r.ok) return;
+    const j=await r.json(); routes=j.routes||{}; renderList(radarPlanes); if(selectedId) renderDetails(); }catch(e){}
+}
+function routeOf(p){
+  const k=String(p.callsign||'').trim().toUpperCase(); if(!k) return null;
+  const a=routes[k+'|A'], d=routes[k+'|D'];
+  return p.isDeparting ? (d||null) : (p.isApproach||p.isFinal) ? (a||null) : (a||d||null);
+}
+const routeTxt=r=> r ? `${r.dir==='A'?'מ':'ל'}${/^[A-Za-z0-9]/.test(r.city)?'-':''}${r.city}` : '';
 
 // ===================== FLIGHT DETAILS =====================
 const KIND_LABEL={tanker:'מטוס תדלוק צבאי',military:'כלי טיס צבאי',helicopter:'מסוק',light:'מטוס קל או פרטי',other:'כלי טיס אחר'};
@@ -877,7 +904,7 @@ function renderDetails(){
   if(!selectedId){ el.classList.remove('on'); return; }
   const p=radarPlanes.find(x=>x.icao24===selectedId);
   if(!p){ el.innerHTML=`<div class="hd"><div class="nm">המטוס יצא מהטווח</div><button class="x" onclick="closeDetails()">✕</button></div>`; el.classList.add('on'); return; }
-  const al=airlineOf(p.callsign);
+  const al=airlineOf(p.callsign), rt=routeOf(p);
   const f=(v,d=0)=>v==null||isNaN(v)?'--':Number(v).toLocaleString('he-IL',{maximumFractionDigits:d});
   const st= p.squawk==='7700'?['מצב חירום (7700)','#e0533d']
           : p.squawk==='7600'?['תקלת קשר (7600)','#e08a4a']
@@ -893,6 +920,7 @@ function renderDetails(){
      <button class="x" onclick="closeDetails()" title="סגור">✕</button></div>
    <span class="st" style="color:${st[1]}">${st[0]}</span>
    <div class="gr">
+     ${rt?`<div><b class="city">${esc(rt.city)}</b><span>${rt.dir==='A'?'מוצא':'יעד'}, טיסה <bdi>${esc(rt.flight)}</bdi></span></div>`:''}
      <div><b dir="ltr">${esc(typeName(p.type)||'--')}</b><span>סוג מטוס</span></div>
      <div><b>${p.onGround?'קרקע':f(p.alt)+' מ\''}</b><span>גובה${p.alt&&!p.onGround?', '+f(p.alt/0.3048)+' רגל':''}</span></div>
      <div><b>${f(p.speed)} קמ"ש</b><span>מהירות קרקע</span></div>
@@ -1168,8 +1196,8 @@ document.getElementById('btnT').addEventListener('click',()=> running?stopMonito
 document.getElementById('btnD').addEventListener('click',()=>{
   demoMode=!demoMode;
   const b=document.getElementById('btnD');
-  if(demoMode){ b.classList.add('on'); b.textContent='יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; resetAirspace(); initDemo(); demoTick(); demoTimer=setInterval(demoTick,3000); }
-  else{ b.classList.remove('on'); b.textContent='הדגמה'; clearInterval(demoTimer); demoPlanes=[]; processPlanes([],true,80); resetAirspace(); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
+  if(demoMode){ b.classList.add('on'); b.textContent='יציאה מהדגמה'; clearTimeout(fetchTimer); fetchGen++; nextAt=0; resetAirspace(); initDemo(); routes=DEMO_ROUTES; demoTick(); demoTimer=setInterval(demoTick,3000); }
+  else{ b.classList.remove('on'); b.textContent='הדגמה'; clearInterval(demoTimer); demoPlanes=[]; routes={}; fetchRoutes(); processPlanes([],true,80); resetAirspace(); document.getElementById('lastUp').textContent='לא עודכן'; setDiag('יצאת ממצב הדגמה – מושך נתונים אמיתיים…'); document.getElementById('dot').className=''; if(running){ fetchGen++; doFetch(); } }
 });
 
 // ===================== PHONE TABS =====================
@@ -1186,7 +1214,7 @@ document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.c
 { const ck=document.getElementById('clock'); const t=()=>{ ck.textContent=new Date().toISOString().slice(11,19)+'Z'; }; t(); setInterval(t,1000); }
 window.addEventListener('resize',()=>{ resizeGlobe(); setTimeout(()=>map&&map.invalidateSize(),100); });
 window.addEventListener('load',()=>{
-  setTimeout(()=>{ resizeGlobe(); if(map){ map.invalidateSize(); map.setView([TLV_LAT,TLV_LON],10); } requestAnimationFrame(globeLoop); startMonitor(); },100);
+  setTimeout(()=>{ resizeGlobe(); if(map){ map.invalidateSize(); map.setView([TLV_LAT,TLV_LON],10); } requestAnimationFrame(globeLoop); startMonitor(); fetchRoutes(); setInterval(fetchRoutes,5*60e3); },100);
 });
 </script>
 </body>
