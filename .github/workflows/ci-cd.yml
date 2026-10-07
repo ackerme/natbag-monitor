@@ -1,8 +1,12 @@
 # CI/CD למוניטור נתב"ג
-#  • בכל push ו-pull request: מריץ את הבדיקות (npm test)
+#  • בכל push ו-pull request: בדיקות (npm test), סריקת סודות (gitleaks), סריקת תשתית-כקוד (Checkov)
+#    ובדיקות ops: Prometheus (promtool), Terraform (validate), Ansible (ansible-lint), Docker Compose
+#  • הפריסה רצה רק אם הבדיקות וסריקת הסודות עברו (Security Gate)
 #  • push לענף dev  → פריסה לסביבת הבדיקה (stack: natbag-staging) + smoke test
 #  • push לענף main → פריסה ל-production (stack: natbag) + smoke test
 # החיבור ל-AWS נעשה עם OIDC – בלי מפתחות גישה שמורים ב-GitHub.
+# כל Action נעול ל-commit מדויק (SHA) ולא לתגית שאפשר להזיז – הגנה מפני מתקפת שרשרת אספקה.
+# Dependabot מעדכן את ה-SHA לבד כשיוצאת גרסה חדשה.
 # זרימת עבודה: מפתחים ב-dev → בודקים ב-staging → Pull Request ל-main → production.
 
 name: CI/CD
@@ -25,16 +29,94 @@ jobs:
     name: בדיקות
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - run: node --check detect.js
       - run: npm test
 
+  secrets-scan:
+    name: סריקת סודות
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0              # כל ההיסטוריה – גם סוד שנמחק אחר כך נשאר ב-git
+          persist-credentials: false
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  iac-scan:
+    name: סריקת תשתית (Checkov)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write    # מפרסם את הממצאים בלשונית Security → Code scanning
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Checkov – בדיקת template.yaml מול כללי אבטחה של AWS
+        uses: bridgecrewio/checkov-action@a76233b2c1d4a820a9dc68be350c473a4a9dceec # v12
+        with:
+          directory: .
+          framework: cloudformation,terraform,dockerfile
+          soft_fail: true         # שלב 1: רק מדווח, לא חוסם. אחרי שנטפל בממצאים – נהפוך לחוסם
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+      - name: העלאת הממצאים ל-GitHub Security
+        if: always() && hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          sarif_file: results.sarif
+          category: checkov
+
+  ops-checks:
+    name: בדיקות ops (Prometheus, Terraform, Ansible, Compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prometheus – תקינות ההגדרות, כללי ההתרעה ובדיקות היחידה שלהם
+        working-directory: ops/monitoring/prometheus
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w prom/prometheus:v3.5.0 check config --syntax-only prometheus.yml
+          docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w prom/prometheus:v3.5.0 check rules rules/natbag.rules.yml
+          docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w/tests prom/prometheus:v3.5.0 test rules natbag.rules.test.yml
+      - name: Docker Compose – תקינות + בניית ה-exporter
+        working-directory: ops/monitoring
+        run: |
+          grep -v '^GRAFANA_ADMIN_PASSWORD=' env.example > .env && echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> .env
+          docker compose config --quiet
+          docker compose build exporter
+      - name: Grafana – לוח הבקרה הוא JSON תקין
+        run: python3 -c "import json; json.load(open('ops/monitoring/grafana/dashboards/natbag-ops.json'))"
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - name: Terraform – פורמט ותקינות
+        working-directory: ops/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Ansible – lint ובדיקת תחביר
+        working-directory: ops/ansible
+        run: |
+          pip install --quiet ansible-core==2.17.* ansible-lint==24.*
+          ansible-playbook site.yml --syntax-check
+          ansible-lint -c ansible-lint.yml site.yml
+
   deploy-staging:
     name: פריסה ל-staging
-    needs: test
+    needs: [test, secrets-scan]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
     permissions:
@@ -42,10 +124,12 @@ jobs:
       contents: read
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: בדיקת OIDC (מה GitHub שולח ל-AWS)
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const t = await core.getIDToken('sts.amazonaws.com');
@@ -56,12 +140,25 @@ jobs:
           ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
 
       - name: התחברות ל-AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
 
-      - uses: aws-actions/setup-sam@v2
+      - name: בדיקת Secrets
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          IVR_TOKEN: ${{ secrets.IVR_TOKEN }}
+        run: |
+          missing=""
+          [ -z "$ALERT_EMAIL" ] && missing="$missing ALERT_EMAIL"
+          [ -z "$IVR_TOKEN" ] && missing="$missing IVR_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::חסרים Secrets ב-GitHub (Settings → Secrets and variables → Actions → Secrets):$missing"
+            exit 1
+          fi
+
+      - uses: aws-actions/setup-sam@f84ec7d548307efafe33230528756de3c5841a17 # v2
         with:
           use-installer: true
 
@@ -89,7 +186,7 @@ jobs:
 
   deploy:
     name: פריסה ל-production
-    needs: test
+    needs: [test, secrets-scan]
     # רק ב-push ל-main, ורק אם הוגדר תפקיד ה-OIDC (Settings → Variables)
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
@@ -98,10 +195,12 @@ jobs:
       contents: read
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: בדיקת OIDC (מה GitHub שולח ל-AWS)
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const t = await core.getIDToken('sts.amazonaws.com');
@@ -112,12 +211,25 @@ jobs:
           ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
 
       - name: התחברות ל-AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
 
-      - uses: aws-actions/setup-sam@v2
+      - name: בדיקת Secrets
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          IVR_TOKEN: ${{ secrets.IVR_TOKEN }}
+        run: |
+          missing=""
+          [ -z "$ALERT_EMAIL" ] && missing="$missing ALERT_EMAIL"
+          [ -z "$IVR_TOKEN" ] && missing="$missing IVR_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::חסרים Secrets ב-GitHub (Settings → Secrets and variables → Actions → Secrets):$missing"
+            exit 1
+          fi
+
+      - uses: aws-actions/setup-sam@f84ec7d548307efafe33230528756de3c5841a17 # v2
         with:
           use-installer: true
 

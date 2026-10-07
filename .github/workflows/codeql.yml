@@ -1,0 +1,32 @@
+# CodeQL – סריקת אבטחה סטטית של הקוד (JavaScript), של GitHub. חינם ל-repo ציבורי.
+# מחפש: XSS, הזרקות, שימוש לא בטוח בקלט, סודות בקוד וכו'. התוצאות: Security → Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  schedule:
+    - cron: "30 4 * * 0"        # פעם בשבוע (ראשון 07:30 בישראל) – גם בלי שינויים, למקרה שנוספו כללים חדשים
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: סריקת CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write    # כדי לפרסם את התוצאות בלשונית Security
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          category: "/language:javascript-typescript"
