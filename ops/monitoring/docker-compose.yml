@@ -1,5 +1,5 @@
 # מערך הניטור של מוניטור נתב"ג: Prometheus + Grafana + exporter + בדיקות זמינות מבחוץ
-# הפעלה ידנית:   cp .env.example .env   ואז   docker compose up -d --build
+# הפעלה ידנית:   cp env.example .env   (וממלאים סיסמה)   ואז   docker compose up -d --build
 # או אוטומטית עם Ansible: ops/ansible
 name: natbag-monitoring
 
