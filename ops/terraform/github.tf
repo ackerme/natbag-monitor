@@ -7,6 +7,7 @@ import {
 }
 
 resource "github_repository" "natbag" {
+  #checkov:skip=CKV_GIT_1:ה-repo ציבורי בכוונה – זה פרויקט פורטפוליו. אין בו סודות (gitleaks + Secret scanning + Push protection)
   name         = var.repository
   description  = "ניטור התנועה האווירית סביב נתב\"ג בזמן אמת: רדאר, סטטיסטיקה וקו טלפוני. AWS Lambda, IaC, CI/CD ו-DevSecOps."
   homepage_url = "https://${var.github_owner}.github.io/${var.repository}/"

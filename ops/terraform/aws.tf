@@ -3,8 +3,22 @@
 # יוצרים אותו פעם אחת ידנית (הפקודה מופיעה ב-outputs) ושומרים אותו רק ב-.env של מערך הניטור.
 
 resource "aws_iam_user" "grafana" {
+  #checkov:skip=CKV_AWS_273:Grafana רצה בבית, מחוץ ל-AWS, ולכן צריכה מפתח של משתמש. ההרשאה היא קריאה בלבד, דרך קבוצה, ומוגבלת לאזור אחד
   name = "natbag-grafana-readonly"
   path = "/natbag/"
+}
+
+data "aws_caller_identity" "current" {}
+
+# ההרשאות מוצמדות לקבוצה ולא ישירות למשתמש (קל לנהל, ואפשר להוסיף עוד צופים)
+resource "aws_iam_group" "grafana_readers" {
+  name = "natbag-grafana-readers"
+  path = "/natbag/"
+}
+
+resource "aws_iam_user_group_membership" "grafana" {
+  user   = aws_iam_user.grafana.name
+  groups = [aws_iam_group.grafana_readers.name]
 }
 
 data "aws_iam_policy_document" "grafana_cloudwatch_read" {
@@ -15,10 +29,17 @@ data "aws_iam_policy_document" "grafana_cloudwatch_read" {
       "cloudwatch:GetMetricData",
       "cloudwatch:GetMetricStatistics",
       "cloudwatch:ListMetrics",
-      "cloudwatch:DescribeAlarms",
       "cloudwatch:DescribeAlarmsForMetric",
     ]
-    resources = ["*"] # פעולות הקריאה של CloudWatch לא תומכות בהגבלה למשאב מסוים
+    resources = ["*"] # הפעולות האלה לא תומכות בהגבלה למשאב מסוים (כך מוגדר ב-IAM של AWS)
+  }
+
+  # את ההתרעות אפשר להגביל – רק ההתרעות של הפרויקט
+  statement {
+    sid       = "ReadNatbagAlarms"
+    effect    = "Allow"
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:natbag-*"]
   }
 
   statement {
@@ -42,8 +63,8 @@ data "aws_iam_policy_document" "grafana_cloudwatch_read" {
   }
 }
 
-resource "aws_iam_user_policy" "grafana_cloudwatch_read" {
+resource "aws_iam_group_policy" "grafana_cloudwatch_read" {
   name   = "cloudwatch-read-only"
-  user   = aws_iam_user.grafana.name
+  group  = aws_iam_group.grafana_readers.name
   policy = data.aws_iam_policy_document.grafana_cloudwatch_read.json
 }
