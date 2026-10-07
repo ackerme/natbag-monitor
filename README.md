@@ -55,11 +55,24 @@ flowchart LR
 - **ניטור:** מדדים, בדיקת זמינות כל 5 דקות, 7 התרעות במייל ולוח בקרה. פירוט בהמשך.
 - **IAM:** לכל פונקציה יש רק את ההרשאות שהיא צריכה (least privilege).
 
+## ניטור, תשתית כקוד ואוטומציה (`ops/`)
+
+- **Prometheus + Grafana:** מערך ניטור שרץ ב-Docker. `natbag-exporter` הופך את נתוני המטוסים והסטטיסטיקה למדדים, `blackbox_exporter` בודק מבחוץ שהאתר והשרת עונים, ו-Grafana מציגה לוח בקרה שמוגדר כקוד. יש 8 כללי התרעה עם בדיקות יחידה.
+- **Ansible:** פקודה אחת שמתקינה Docker ומפעילה את כל מערך הניטור על מחשב Linux (WSL2 או Raspberry Pi).
+- **Terraform:** הגדרות האבטחה של ה-repo ב-GitHub כקוד, ומשתמש IAM לקריאה בלבד מ-CloudWatch בשביל Grafana.
+
+פירוט והוראות הרצה ב-[ops/README.md](ops/README.md).
+
 ## אבטחה בתהליך הפיתוח (DevSecOps)
 
 - **סריקת סודות (gitleaks):** רצה בכל push כחלק מה-CI. פריסה ל-AWS לא תצא אם נמצא סוד בקוד.
 - **CodeQL:** סריקה סטטית של קוד ה-JavaScript (כללי `security-extended`), בכל push ופעם בשבוע. התוצאות מופיעות ב-Security → Code scanning.
 - **Dependabot:** פעם בשבוע בודק גרסאות חדשות של ה-Actions ושל חבילות npm, ופותח Pull Request לבד.
+- **Checkov (תשתית כקוד):** בודק את `natbag-aws/template.yaml` מול כללי אבטחה של AWS (הצפנה, הרשאות, לוגים) בכל push. הממצאים מופיעים ב-Security → Code scanning. כרגע במצב דיווח בלבד, ואחרי טיפול בממצאים הוא יהפוך לחוסם.
+- **Actions נעולים ל-SHA:** כל Action ב-workflows מצביע על commit מדויק ולא על תגית כמו `v4`, שמי שמחזיק את ה-Action יכול להזיז. זו הגנה מפני מתקפת שרשרת אספקה, ו-Dependabot מעדכן את ה-SHA לבד.
+- **`persist-credentials: false`:** הטוקן של GitHub לא נשמר בדיסק אחרי ה-checkout, כך ששלב אחר ב-workflow לא יכול להשתמש בו.
+- **Security Gate:** הפריסה ל-AWS רצה רק אחרי שהבדיקות וסריקת הסודות עברו.
+- **הגדרות ב-GitHub:** Secret scanning עם Push protection (חוסם push שמכיל סיסמה), Dependabot alerts ו-Private vulnerability reporting. מדיניות הדיווח על חולשות ב-[SECURITY.md](SECURITY.md).
 - **Push Protection:** GitHub חוסם כבר בזמן ה-push העלאה של מפתח מוכר, כמו AWS או GitHub.
 
 פירוט מלא נמצא ב-[SECURITY.md](SECURITY.md).
@@ -130,7 +143,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    D[git push] --> T[GitHub Actions<br/>npm test · 85 בדיקות]
+    D[git push] --> T[GitHub Actions<br/>npm test · 88 בדיקות]
     T -->|ענף dev| SO[OIDC → AWS] --> SS[sam deploy<br/>natbag-staging] --> SH[Smoke test<br/>stage=staging]
     T -->|ענף main| PO[OIDC → AWS] --> PS[sam deploy<br/>natbag] --> PH[Smoke test]
     SH -.->|Pull Request dev → main| T
@@ -148,7 +161,7 @@ flowchart LR
 
 ההבדל נקבע בפרמטר `Stage` ב-`template.yaml` ובתנאי `IsProd`. ב-staging לא נשלחים מדדים ואין התרעות, כדי להישאר ב-Free Tier ולא לקבל מיילים על סביבת בדיקה.
 
-- **בדיקות** (`tests/`): 85 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
+- **בדיקות** (`tests/`): 88 בדיקות עם `node:test` המובנה, בלי תלויות חיצוניות.
   - לוגיקת הזיהוי: המרות יחידות, זיהוי קרקע והמראה, גישה סופית, התרעה ומגמה. חלק מהבדיקות רצות על נתוני ADS-B אמיתיים מנתב"ג.
   - שרת הביניים: מעבר בין מקורות, מטמון, gzip ובדיקת קלט.
 - **פריסה:** GitHub Actions מתחבר ל-AWS עם OIDC. ההרשאה ניתנת לתפקיד IAM מוגבל, רק ל-repo הזה ורק לסביבת `production`.
