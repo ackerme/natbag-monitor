@@ -1,0 +1,9 @@
+# התקנה מלאה:  ansible-playbook site.yml --ask-become-pass
+#   1. Docker + Docker Compose
+#   2. מערך הניטור (Prometheus, Grafana, exporter, blackbox) מתוך ה-repo ב-GitHub
+- name: מערך הניטור של מוניטור נתב"ג
+  hosts: monitoring
+  become: true
+  roles:
+    - docker
+    - natbag_monitoring

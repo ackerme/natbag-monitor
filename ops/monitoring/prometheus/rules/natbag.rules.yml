@@ -1,0 +1,58 @@
+# כללי התרעה. מופיעים ב-Prometheus תחת Alerts, וב-Grafana בלוח הבקרה.
+groups:
+  - name: natbag-availability
+    rules:
+      - alert: SiteOrApiDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} לא עונה כבר 5 דקות"
+
+      - alert: ApiSlow
+        expr: probe_duration_seconds{job="blackbox-http"} > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} עונה לאט (יותר מ-5 שניות) כבר 10 דקות"
+
+      - alert: TlsCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-http"} - time()) / 86400 < 14
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "תעודת ה-TLS של {{ $labels.instance }} פגה בעוד פחות מ-14 יום"
+
+      - alert: AircraftEndpointFailing
+        expr: natbag_api_up{endpoint="aircraft"} == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "השרת לא מחזיר נתוני מטוסים כבר 10 דקות – כנראה כל מקורות ה-ADS-B נפלו"
+
+      - alert: HealthcheckStale
+        expr: natbag_last_healthcheck_age_seconds > 900
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "בדיקת הזמינות ב-AWS לא רצה יותר מ-15 דקות"
+
+  - name: natbag-traffic
+    rules:
+      # רמת הקלטה מוכנה מראש – לגרפים מהירים
+      - record: natbag:aircraft_airborne:sum
+        expr: sum(natbag_aircraft)
+
+      - alert: NoAircraftInDaytime
+        # אף מטוס בטווח 100 ק"מ בשעות היום (06:00–22:00 שעון ישראל, UTC+3) – כנראה בעיה בנתונים
+        expr: natbag:aircraft_airborne:sum == 0 and on() (hour() >= 3 and hour() < 19)
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "אין אף מטוס בטווח כבר 30 דקות בשעות היום – לבדוק את מקורות הנתונים"
+
+      - alert: DeviationAlertsSpike
+        expr: increase(natbag_deviation_alerts_today[1h]) >= 3
+        labels: { severity: info }
+        annotations:
+          summary: "3 התרעות סטייה או יותר בשעה האחרונה"

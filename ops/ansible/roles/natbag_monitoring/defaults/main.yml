@@ -1,0 +1,12 @@
+natbag_dir: /opt/natbag-monitor
+natbag_repo: https://github.com/ackerme/natbag-monitor.git
+natbag_version: main
+natbag_proxy_url: ""
+natbag_site_url: https://ackerme.github.io/natbag-monitor/
+natbag_prom_retention: 30d
+grafana_admin_user: admin
+# הסיסמה נשאלת בהרצה (vars_prompt לא נוח בתפקיד), או נשמרת מוצפנת:
+#   ansible-vault encrypt_string 'הסיסמה' --name grafana_admin_password >> group_vars/monitoring.yml
+grafana_admin_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') }}"
+grafana_aws_access_key_id: ""
+grafana_aws_secret_access_key: ""

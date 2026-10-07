@@ -1,0 +1,5 @@
+# מעתיקים ל-terraform.tfvars אם רוצים לשנות ברירות מחדל (הקובץ לא עולה ל-GitHub)
+aws_region      = "us-east-1"
+github_owner    = "ackerme"
+repository      = "natbag-monitor"
+deploy_role_arn = "arn:aws:iam::299482272081:role/gha-natbag-deploy"

@@ -1,0 +1,54 @@
+# בדיקות יחידה לכללי ההתרעה:  promtool test rules tests/natbag.rules.test.yml
+rule_files:
+  - ../rules/natbag.rules.yml
+evaluation_interval: 1m
+tests:
+  - name: האתר לא עונה 6 דקות → התרעה
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-http",instance="https://site"}'
+        values: '1 1 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: SiteOrApiDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: SiteOrApiDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: blackbox-http, instance: "https://site" }
+            exp_annotations: { summary: "https://site לא עונה כבר 5 דקות" }
+
+  - name: אין מטוסים בשעות היום → התרעה
+    interval: 1m
+    input_series:
+      # הבדיקה מתחילה ב-00:00 UTC; בודקים ב-06:40 UTC = 09:40 בישראל, אחרי שעה בלי מטוסים
+      - series: 'natbag_aircraft{move="arr"}'
+        values: '5x340 0x80'
+      - series: 'natbag_aircraft{move="dep"}'
+        values: '5x340 0x80'
+    alert_rule_test:
+      - eval_time: 6h40m
+        alertname: NoAircraftInDaytime
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations: { summary: "אין אף מטוס בטווח כבר 30 דקות בשעות היום – לבדוק את מקורות הנתונים" }
+
+  - name: אין מטוסים בלילה (03:00 בישראל) → אין התרעה
+    interval: 1m
+    input_series:
+      - series: 'natbag_aircraft{move="other"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NoAircraftInDaytime
+        exp_alerts: []
+
+  - name: יש מטוסים → אין התרעה
+    interval: 1m
+    input_series:
+      - series: 'natbag_aircraft{move="other"}'
+        values: '5x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NoAircraftInDaytime
+        exp_alerts: []

@@ -1,0 +1,4 @@
+# ערכים לכל המכונות בקבוצה. את הסיסמה לא כותבים כאן – ראו roles/natbag_monitoring/defaults/main.yml
+natbag_repo: https://github.com/ackerme/natbag-monitor.git
+natbag_version: main
+natbag_proxy_url: https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws

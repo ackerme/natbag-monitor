@@ -1,0 +1,37 @@
+# Prometheus – מה בודקים וכל כמה זמן
+global:
+  scrape_interval: 60s
+  evaluation_interval: 60s
+  external_labels:
+    project: natbag-monitor
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # מדדי התנועה והמערכת (natbag-exporter)
+  - job_name: natbag
+    static_configs:
+      - targets: ["exporter:9877"]
+
+  # בדיקות זמינות מבחוץ, כמו משתמש: האתר והשרת
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://ackerme.github.io/natbag-monitor/
+          - https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/health
+        labels: { group: public }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

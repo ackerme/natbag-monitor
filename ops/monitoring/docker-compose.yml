@@ -1,0 +1,63 @@
+# מערך הניטור של מוניטור נתב"ג: Prometheus + Grafana + exporter + בדיקות זמינות מבחוץ
+# הפעלה ידנית:   cp .env.example .env   ואז   docker compose up -d --build
+# או אוטומטית עם Ansible: ops/ansible
+name: natbag-monitoring
+
+services:
+  exporter:
+    build:
+      context: ../..                       # שורש ה-repo – כדי להשתמש ב-flights.mjs של השרת
+      dockerfile: ops/monitoring/exporter/Dockerfile
+    environment:
+      PROXY_URL: ${PROXY_URL:?חסר PROXY_URL ב-.env}
+      CACHE_SECONDS: "30"
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.27.0
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes: ["./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro"]
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=${PROM_RETENTION:-30d}
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports: ["127.0.0.1:9090:9090"]           # רק מהמחשב עצמו
+    depends_on: [exporter, blackbox]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  grafana:
+    image: grafana/grafana-oss:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?חסרה סיסמת Grafana ב-.env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/natbag-ops.json
+      # CloudWatch (לא חובה): מפתח קריאה בלבד שיוצרים לפי ops/terraform
+      AWS_ACCESS_KEY_ID: ${GRAFANA_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${GRAFANA_AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]           # רק מהמחשב עצמו
+    depends_on: [prometheus]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  prometheus-data:
+  grafana-data:

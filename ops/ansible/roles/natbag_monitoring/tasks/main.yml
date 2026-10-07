@@ -1,0 +1,64 @@
+- name: בדיקה שיש סיסמה ל-Grafana ושכתובת השרת מוגדרת
+  ansible.builtin.assert:
+    that:
+      - grafana_admin_password | length >= 12
+      - natbag_proxy_url is match('^https://')
+    fail_msg: >-
+      חסרה סיסמה ל-Grafana (לפחות 12 תווים). הריצו כך:
+      GRAFANA_ADMIN_PASSWORD='...' ansible-playbook site.yml --ask-become-pass
+    quiet: true
+
+- name: הורדת הקוד מ-GitHub (או עדכון לגרסה האחרונה)
+  ansible.builtin.git:
+    repo: "{{ natbag_repo }}"
+    dest: "{{ natbag_dir }}"
+    version: "{{ natbag_version }}"
+    depth: 1
+    force: true
+  register: natbag_repo_result
+  notify: הפעלה מחדש של הניטור
+
+- name: קובץ ההגדרות (.env) – רק לבעלים
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ natbag_dir }}/ops/monitoring/.env"
+    mode: "0600"
+  no_log: true
+  notify: הפעלה מחדש של הניטור
+
+- name: הפעלת מערך הניטור
+  ansible.builtin.command:
+    cmd: docker compose up -d --build --remove-orphans
+    chdir: "{{ natbag_dir }}/ops/monitoring"
+  register: natbag_compose_up
+  changed_when: "'Started' in natbag_compose_up.stderr or 'Created' in natbag_compose_up.stderr"
+
+- name: אם השתנו קבצי הגדרות – מפעילים מחדש לפני הבדיקות
+  ansible.builtin.meta: flush_handlers
+
+- name: מחכים ש-Grafana תעלה
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/api/health
+    status_code: 200
+  register: natbag_grafana_health
+  retries: 20
+  delay: 3
+  until: natbag_grafana_health.status == 200
+
+- name: מחכים ש-Prometheus יקבל מדדים מה-exporter
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22natbag%22%7D
+    return_content: true
+  register: natbag_prom_up
+  retries: 20
+  delay: 6
+  until: >-
+    natbag_prom_up.json is defined and
+    (natbag_prom_up.json.data.result | length > 0) and
+    (natbag_prom_up.json.data.result[0].value[1] == '1')
+
+- name: סיכום
+  ansible.builtin.debug:
+    msg:
+      - "Grafana:    http://localhost:3000  (משתמש: {{ grafana_admin_user }})"
+      - "Prometheus: http://localhost:9090"
