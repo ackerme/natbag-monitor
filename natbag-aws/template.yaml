@@ -42,6 +42,17 @@ Resources:
   # ───────────── שרת הביניים ─────────────
   ProxyFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
     Properties:
       FunctionName: !If [IsProd, natbag-proxy, natbag-staging-proxy]
       CodeUri: src/proxy/
@@ -71,12 +82,22 @@ Resources:
 
   ProxyLogGroup:
     Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
     Properties:
       LogGroupName: !If [IsProd, /aws/lambda/natbag-proxy, /aws/lambda/natbag-staging-proxy]
       RetentionInDays: 3              # לוגים נמחקים אחרי 3 ימים – לא מצטברת עלות אחסון
 
   ProxyUrl:
     Type: AWS::Lambda::Url
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_258
+            comment: "ציבורי בכוונה: האתר והקו הטלפוני ניגשים בלי התחברות. הגנות: CORS, טוקן לנתיב /ivr, נתוני קריאה בלבד, Budget + Kill Switch"
     Properties:
       TargetFunctionArn: !GetAtt ProxyFunction.Arn
       AuthType: NONE
@@ -105,6 +126,11 @@ Resources:
   # ───────────── תקציב + מתג כיבוי (רק ב-prod – התקציב הוא על כל החשבון) ─────────────
   BudgetAlertTopic:
     Type: AWS::SNS::Topic
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_26
+            comment: "Budgets ו-CloudWatch Alarms יכולים לפרסם לנושא מוצפן רק עם מפתח KMS משלך (דולר בחודש); ההודעות לא מכילות מידע רגיש"
     Condition: IsProd
     Properties:
       TopicName: natbag-budget-alerts
@@ -162,6 +188,17 @@ Resources:
 
   KillSwitchFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
     Condition: IsProd
     Properties:
       FunctionName: natbag-killswitch
@@ -189,6 +226,11 @@ Resources:
 
   KillSwitchLogGroup:
     Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
     Condition: IsProd
     Properties:
       LogGroupName: /aws/lambda/natbag-killswitch
@@ -198,6 +240,11 @@ Resources:
   # התרעות על המערכת עצמה נשלחות למייל דרך SNS. צריך לאשר את המייל הראשון ש-AWS שולחת ("Confirm subscription").
   OpsAlertTopic:
     Type: AWS::SNS::Topic
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_26
+            comment: "Budgets ו-CloudWatch Alarms יכולים לפרסם לנושא מוצפן רק עם מפתח KMS משלך (דולר בחודש); ההודעות לא מכילות מידע רגיש"
     Condition: IsProd
     Properties:
       TopicName: natbag-ops-alerts
@@ -208,6 +255,17 @@ Resources:
   # בדיקת זמינות מבחוץ כל 5 דקות: /health, /aircraft והאתר
   HealthCheckFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
     Condition: IsProd
     Properties:
       FunctionName: natbag-healthcheck
@@ -237,6 +295,11 @@ Resources:
 
   HealthCheckLogGroup:
     Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
     Condition: IsProd
     Properties:
       LogGroupName: /aws/lambda/natbag-healthcheck
@@ -360,6 +423,11 @@ Resources:
   # כשהמדד עובר ל"חריגה משמעותית" – לכל היותר שיחה אחת בחצי שעה.
   WatchTable:
     Type: AWS::DynamoDB::Table
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "הטבלה מוצפנת כברירת מחדל ב-AWS-owned key; מפתח KMS משלך עולה דולר בחודש, והנתונים הם סטטיסטיקה ציבורית"
     Condition: IsProd
     Properties:
       TableName: natbag-watch
@@ -369,9 +437,23 @@ Resources:
       ProvisionedThroughput: { ReadCapacityUnits: 10, WriteCapacityUnits: 10 }
       AttributeDefinitions: [{ AttributeName: pk, AttributeType: S }]
       KeySchema: [{ AttributeName: pk, KeyType: HASH }]
+      # גיבוי רציף – אפשר לשחזר את הסטטיסטיקה לכל נקודה ב-35 הימים האחרונים (הטבלה קטנה, העלות זניחה)
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   WatcherFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
     Condition: IsProd
     Properties:
       FunctionName: natbag-watcher
@@ -403,6 +485,11 @@ Resources:
 
   WatcherLogGroup:
     Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
     Condition: IsProd
     Properties:
       LogGroupName: /aws/lambda/natbag-watcher
