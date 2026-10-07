@@ -1,0 +1,17 @@
+# Dependabot – בודק פעם בשבוע אם יש גרסאות חדשות (או תיקוני אבטחה) ופותח Pull Request לבד.
+version: 2
+updates:
+  # הגרסאות של ה-Actions ב-workflows (checkout, setup-node, configure-aws-credentials...)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: sunday, time: "06:00", timezone: Asia/Jerusalem }
+    labels: [dependencies, ci]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # חבילות npm (package.json)
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly, day: sunday, time: "06:00", timezone: Asia/Jerusalem }
+    labels: [dependencies]
