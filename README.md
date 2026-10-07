@@ -68,7 +68,7 @@ flowchart LR
 - **סריקת סודות (gitleaks):** רצה בכל push כחלק מה-CI. פריסה ל-AWS לא תצא אם נמצא סוד בקוד.
 - **CodeQL:** סריקה סטטית של קוד ה-JavaScript (כללי `security-extended`), בכל push ופעם בשבוע. התוצאות מופיעות ב-Security → Code scanning.
 - **Dependabot:** פעם בשבוע בודק גרסאות חדשות של ה-Actions ושל חבילות npm, ופותח Pull Request לבד.
-- **Checkov (תשתית כקוד):** בודק את `natbag-aws/template.yaml` מול כללי אבטחה של AWS (הצפנה, הרשאות, לוגים) בכל push. הממצאים מופיעים ב-Security → Code scanning. כרגע במצב דיווח בלבד, ואחרי טיפול בממצאים הוא יהפוך לחוסם.
+- **Checkov (תשתית כקוד):** בודק את ה-CloudFormation, ה-Terraform וה-Dockerfile מול כללי אבטחה בכל push, ונכשל על כל ממצא פתוח. מה שתוקן: גיבוי רציף (PITR) לטבלת DynamoDB, הרשאות IAM דרך קבוצה במקום ישירות למשתמש, והגבלת `DescribeAlarms` להתרעות של הפרויקט בלבד. מה שלא מתאים לפרויקט חינמי ובלי שרתים (VPC עם NAT, מפתחות KMS משלך, repo פרטי) מסומן בקוד עם `checkov:skip` והסבר למה – כך שכל חריגה מתועדת ונבדקת ב-Code Review.
 - **Actions נעולים ל-SHA:** כל Action ב-workflows מצביע על commit מדויק ולא על תגית כמו `v4`, שמי שמחזיק את ה-Action יכול להזיז. זו הגנה מפני מתקפת שרשרת אספקה, ו-Dependabot מעדכן את ה-SHA לבד.
 - **`persist-credentials: false`:** הטוקן של GitHub לא נשמר בדיסק אחרי ה-checkout, כך ששלב אחר ב-workflow לא יכול להשתמש בו.
 - **Security Gate:** הפריסה ל-AWS רצה רק אחרי שהבדיקות וסריקת הסודות עברו.
