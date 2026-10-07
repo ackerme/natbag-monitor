@@ -66,7 +66,7 @@ jobs:
         with:
           directory: .
           framework: cloudformation,terraform,dockerfile
-          soft_fail: true         # שלב 1: רק מדווח, לא חוסם. אחרי שנטפל בממצאים – נהפוך לחוסם
+          soft_fail: false        # כל ממצא פתוח מכשיל את השלב. חריגות מוצדקות מסומנות בקוד עם הסבר (checkov:skip)
           output_format: cli,sarif
           output_file_path: console,results.sarif
       - name: העלאת הממצאים ל-GitHub Security
