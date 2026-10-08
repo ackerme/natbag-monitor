@@ -89,6 +89,9 @@ jobs:
           docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w prom/prometheus:v3.5.0 check config --syntax-only prometheus.yml
           docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w prom/prometheus:v3.5.0 check rules rules/natbag.rules.yml
           docker run --rm --entrypoint promtool -v "$PWD:/w" -w /w/tests prom/prometheus:v3.5.0 test rules natbag.rules.test.yml
+      - name: Alertmanager – תקינות ההגדרות
+        working-directory: ops/monitoring/alertmanager
+        run: docker run --rm --entrypoint amtool -v "$PWD:/w" -w /w prom/alertmanager:v0.28.1 check-config alertmanager.example.yml
       - name: Docker Compose – תקינות + בניית ה-exporter
         working-directory: ops/monitoring
         run: |
