@@ -57,6 +57,7 @@
   ansible.builtin.template:
     src: env.j2
     dest: "{{ natbag_dir }}/ops/monitoring/.env"
+    owner: "{{ docker_target_user | default(omit) }}"   # כדי שאפשר יהיה להריץ docker compose בלי sudo
     mode: "0600"
   no_log: true
   notify: הפעלה מחדש של הניטור
