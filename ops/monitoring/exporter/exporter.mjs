@@ -80,6 +80,15 @@ export function statsMetrics(s, now = Date.now()) {
     g("natbag_last_healthcheck_age_seconds", "כמה זמן עבר מבדיקת הזמינות האחרונה", st.lastCheck ? Math.max(0, (now - st.lastCheck.t) / 1000) : null),
     g("natbag_last_healthcheck_passed", "האם בדיקת הזמינות האחרונה עברה (1/0)", st.lastCheck ? (st.lastCheck.pass ? 1 : 0) : null),
   );
+  // קו הטלפון (ימות המשיח)
+  const ph = s?.phone?.today;
+  if (ph) out.push(
+    g("natbag_phone_calls_today", "שיחות לקו הטלפון היום", ph.calls),
+    g("natbag_phone_callers_today", "מתקשרים שונים היום", ph.callers),
+    g("natbag_phone_requests_today", "פניות לשרת מהקו היום (כל הקשה בתפריט)", ph.requests),
+    { name: "natbag_phone_ext_calls_today", help: "שיחות שהגיעו לכל שלוחה היום", samples:
+      Object.entries(ph.byExt || {}).map(([ext, v]) => ({ labels: { ext }, value: v })) },
+  );
   return out;
 }
 

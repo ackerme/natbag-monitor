@@ -16,7 +16,7 @@
 //   GET|POST /ivr                                    → קו טלפוני דרך "ימות המשיח"
 
 import { gzipSync } from "node:zlib";
-import { summarizeStats, israelDates, fromDynamo } from "./stats.mjs";
+import { summarizeStats, israelDates, fromDynamo, ivrUsage } from "./stats.mjs";
 import { parseBoardRecord, findFlights, callsignCandidates, flightAnswer, handleIvr, israelNowMs, routeIndex } from "./flights.mjs";
 
 const UA = "natbag-monitor/1.0";
@@ -242,7 +242,7 @@ async function getStats() {
   if (statsCache.v && Date.now() - statsCache.t < 60_000) return statsCache.v;
   const now = Date.now();
   const sDates = israelDates(now, 7), hDates = israelDates(now, 30);
-  const keys = [...sDates.map(d => `stats#${d}`), ...hDates.map(d => `health#${d}`)];
+  const keys = [...sDates.map(d => `stats#${d}`), ...hDates.map(d => `health#${d}`), ...sDates.map(d => `ivr#${d}`)];
   const { DynamoDBClient, BatchGetItemCommand } = await import("@aws-sdk/client-dynamodb");
   const ddb = new DynamoDBClient({});
   const items = {};
@@ -254,7 +254,8 @@ async function getStats() {
   }
   const statsByDate = Object.fromEntries(sDates.map(d => [d, items[`stats#${d}`] || null]));
   const healthByDate = Object.fromEntries(hDates.map(d => [d, items[`health#${d}`] || null]));
-  const v = { ok: true, data: summarizeStats({ statsByDate, healthByDate, now }) };
+  const ivrByDate = Object.fromEntries(sDates.map(d => [d, items[`ivr#${d}`] || null]));
+  const v = { ok: true, data: summarizeStats({ statsByDate, healthByDate, ivrByDate, now }) };
   statsCache = { t: Date.now(), v };
   return v;
 }
@@ -321,12 +322,34 @@ function parseParams(event) {
   return q;
 }
 
+// סטטיסטיקת הקו: מוסיפים את השיחה לרשומה של היום (ADD לקבוצה לא סופר פעמיים את אותה שיחה)
+async function recordIvr(params) {
+  const u = STATS_TABLE && ivrUsage(params);
+  if (!u) return;
+  try {
+    const { DynamoDBClient, UpdateItemCommand } = await import("@aws-sdk/client-dynamodb");
+    await new DynamoDBClient({}).send(new UpdateItemCommand({
+      TableName: STATS_TABLE,
+      Key: { pk: { S: `ivr#${u.date}` } },
+      UpdateExpression: "ADD calls :c, callers :p, #ext :c, requests :one",
+      ExpressionAttributeNames: { "#ext": `ext_${u.ext}` },
+      ExpressionAttributeValues: { ":c": { SS: [u.callId] }, ":p": { SS: [u.caller] }, ":one": { N: "1" } },
+    }));
+  } catch (e) {   // סטטיסטיקה לא מפילה את הקו
+    console.error(JSON.stringify({ level: "error", route: "ivr-stats", details: [String(e?.message || e)] }));
+  }
+}
+
 async function ivrResponse(event) {
   const params = parseParams(event);
-  const text = (process.env.IVR_TOKEN && params.token !== process.env.IVR_TOKEN)
-    ? "id_list_message=t-גישה לא מורשית&go_to_folder=hangup"
-    : await handleIvr(params, { getBoard, getLive, getNear, onError: (where, e) =>
-        console.error(JSON.stringify({ level: "error", route: `ivr-${where}`, details: [String(e?.message || e)] })) });
+  const authorized = !(process.env.IVR_TOKEN && params.token !== process.env.IVR_TOKEN);
+  const [text] = await Promise.all([
+    authorized
+      ? handleIvr(params, { getBoard, getLive, getNear, onError: (where, e) =>
+          console.error(JSON.stringify({ level: "error", route: `ivr-${where}`, details: [String(e?.message || e)] })) })
+      : "id_list_message=t-גישה לא מורשית&go_to_folder=hangup",
+    authorized ? recordIvr(params) : null,
+  ]);
   return { statusCode: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }, body: text };
 }
 

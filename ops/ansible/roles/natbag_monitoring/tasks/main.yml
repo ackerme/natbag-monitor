@@ -8,6 +8,17 @@
       GRAFANA_ADMIN_PASSWORD='...' ansible-playbook site.yml --ask-become-pass
     quiet: true
 
+- name: אם ביקשו התרעות במייל – צריך גם סיסמת SMTP
+  ansible.builtin.assert:
+    that:
+      - alert_email_to is match('^[^@ ]+@[^@ ]+$')
+      - alert_smtp_password | length >= 8
+    fail_msg: >-
+      ALERT_EMAIL הוגדר אבל חסרה ALERT_SMTP_PASSWORD (ב-Gmail: סיסמת אפליקציה בת 16 תווים
+      מ-https://myaccount.google.com/apppasswords), או שכתובת המייל לא תקינה.
+    quiet: true
+  when: alert_email_to | length > 0
+
 - name: האם המערך כבר הותקן בעבר במחשב הזה
   ansible.builtin.stat:
     path: "{{ natbag_dir }}/ops/monitoring/.env"
@@ -19,7 +30,7 @@
     host: 127.0.0.1
     state: stopped
     timeout: 2
-  loop: ["{{ grafana_port }}", "{{ prometheus_port }}"]
+  loop: ["{{ grafana_port }}", "{{ prometheus_port }}", "{{ alertmanager_port }}"]
   when: not natbag_env_file.stat.exists
   register: natbag_ports
   ignore_errors: true
@@ -28,7 +39,7 @@
   ansible.builtin.fail:
     msg: >-
       הפורט {{ item.item }} כבר תפוס במחשב (כנראה Grafana או Prometheus שכבר מותקנים).
-      הריצו שוב עם פורט אחר, למשל:  -e grafana_port=3001 -e prometheus_port=9091
+      הריצו שוב עם פורט אחר, למשל:  -e grafana_port=3001 -e prometheus_port=9091 -e alertmanager_port=9094
   loop: "{{ natbag_ports.results | default([]) }}"
   when: item.failed | default(false)
 
@@ -47,6 +58,17 @@
     src: env.j2
     dest: "{{ natbag_dir }}/ops/monitoring/.env"
     mode: "0600"
+  no_log: true
+  notify: הפעלה מחדש של הניטור
+
+# הקובץ מכיל את סיסמת ה-SMTP: רק המשתמש של Alertmanager בקונטיינר (nobody, 65534) יכול לקרוא אותו
+- name: הגדרות Alertmanager (לאן ואיך לשלוח מייל)
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ natbag_dir }}/ops/monitoring/alertmanager/alertmanager.yml"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
   no_log: true
   notify: הפעלה מחדש של הניטור
 
@@ -86,3 +108,5 @@
     msg:
       - "Grafana:    http://localhost:{{ grafana_port }}  (משתמש: {{ grafana_admin_user }})"
       - "Prometheus: http://localhost:{{ prometheus_port }}"
+      - "Alertmanager: http://localhost:{{ alertmanager_port }}"
+      - "{{ ('התרעות נשלחות במייל ל-' ~ alert_email_to) if alert_email_to else 'בלי מייל (ALERT_EMAIL לא הוגדר)' }}"

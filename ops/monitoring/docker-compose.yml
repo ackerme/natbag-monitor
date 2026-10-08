@@ -23,18 +23,34 @@ services:
     read_only: true
     security_opt: ["no-new-privileges:true"]
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:${AM_PORT:-9093}
+    volumes:
+      # נוצר על ידי Ansible (עם פרטי המייל), או ידנית:  cp alertmanager/alertmanager.example.yml alertmanager/alertmanager.yml
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports: ["127.0.0.1:${AM_PORT:-9093}:9093"]
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+
   prometheus:
     image: prom/prometheus:v3.5.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=${PROM_RETENTION:-30d}
       - --web.enable-lifecycle
+      - --web.external-url=http://localhost:${PROM_PORT:-9090}
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     ports: ["127.0.0.1:${PROM_PORT:-9090}:9090"]       # רק מהמחשב עצמו; הפורט ניתן לשינוי ב-.env
-    depends_on: [exporter, blackbox]
+    depends_on: [exporter, blackbox, alertmanager]
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
 
@@ -59,5 +75,6 @@ services:
     security_opt: ["no-new-privileges:true"]
 
 volumes:
+  alertmanager-data:
   prometheus-data:
   grafana-data:

@@ -7,6 +7,13 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     jsonData: { timeInterval: 60s }
+  # Alertmanager – רואים ב-Grafana (Alerting) אילו התרעות פתוחות ומה נשלח במייל
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    jsonData: { implementation: prometheus, handleGrafanaManagedAlerts: false }
   # CloudWatch – עובד רק אם מילאתם מפתח קריאה בלבד ב-.env (ops/terraform מסביר איך)
   - name: CloudWatch
     uid: cloudwatch

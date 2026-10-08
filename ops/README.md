@@ -55,6 +55,21 @@ ansible-playbook site.yml --ask-become-pass -e grafana_port=3001 -e prometheus_p
 
 עדכון לגרסה חדשה מ-GitHub: מריצים שוב את אותה פקודת `ansible-playbook`.
 
+## התרעות במייל (Alertmanager)
+
+Prometheus בודק את 8 כללי ההתרעה כל דקה. כלל שנדלק עובר ל-Alertmanager, ששולח מייל: התרעות `critical` ו-`warning` נשלחות, התרעות `info` רק מוצגות. כשהאתר למטה לא נשלחות בנוסף ההתרעות שנובעות מזה (inhibit), ותזכורת על בעיה שנמשכת נשלחת כל 4 שעות. כשהבעיה נפתרת מגיע מייל "נפתר".
+
+ב-Gmail צריך "סיסמת אפליקציה" (App Password), לא את הסיסמה הרגילה: מפעילים אימות דו-שלבי בחשבון, ואז יוצרים סיסמה ב-https://myaccount.google.com/apppasswords.
+
+```bash
+read -s -p "Grafana: " GRAFANA_ADMIN_PASSWORD; export GRAFANA_ADMIN_PASSWORD; echo
+read -p "מייל להתרעות: " ALERT_EMAIL; export ALERT_EMAIL
+read -s -p "סיסמת אפליקציה של Gmail: " ALERT_SMTP_PASSWORD; export ALERT_SMTP_PASSWORD; echo
+ansible-playbook site.yml --ask-become-pass
+```
+
+Ansible יוצר את `monitoring/alertmanager/alertmanager.yml` עם פרטי ה-SMTP. רק המשתמש של Alertmanager בקונטיינר יכול לקרוא את הקובץ, והוא לא עולה ל-GitHub. בלי `ALERT_EMAIL` המערך עובד כרגיל, בלי מייל. ממשק Alertmanager: http://localhost:9093.
+
 ## Terraform
 
 ```bash

@@ -33,3 +33,10 @@ test('statsMetrics: מדדי היום ומצב המערכת', () => {
   // בלי today (תחילת יום) – רק מדדי המערכת
   assert.doesNotMatch(render(statsMetrics({ status: {} }, now)), /natbag_landings_today/);
 });
+
+test('statsMetrics: קו הטלפון', () => {
+  const txt = render(statsMetrics({ status: {}, phone: { today: { calls: 5, callers: 4, requests: 19, byExt: { arr: 3, flight: 2 } } } }));
+  assert.match(txt, /natbag_phone_calls_today 5/);
+  assert.match(txt, /natbag_phone_callers_today 4/);
+  assert.match(txt, /natbag_phone_ext_calls_today\{ext="arr"\} 3/);
+});

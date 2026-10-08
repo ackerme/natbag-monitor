@@ -1,0 +1,49 @@
+# נוצר אוטומטית על ידי Ansible – לא לערוך ידנית ולא להעלות ל-GitHub (יש כאן סיסמת SMTP)
+{% if alert_email_to %}
+global:
+  smtp_smarthost: {{ alert_smtp_host | to_json }}
+  smtp_from: {{ ('natbag-monitor <' ~ alert_email_from ~ '>') | to_json }}
+  smtp_auth_username: {{ alert_smtp_username | to_json }}
+  smtp_auth_password: {{ alert_smtp_password | to_json }}
+  smtp_require_tls: true
+{% endif %}
+
+route:
+  receiver: {{ 'email' if alert_email_to else 'none' }}
+  group_by: [alertname]
+  group_wait: 30s        # מחכים קצת כדי לאחד כמה התרעות שנדלקו יחד למייל אחד
+  group_interval: 5m
+  repeat_interval: 4h    # אם הבעיה נמשכת – תזכורת כל 4 שעות, לא הצפה
+  routes:
+    - matchers: ['severity="info"']   # התרעות מידע בלבד (למשל DeviationAlertsSpike) – בלי מייל
+      receiver: none
+
+# כשהאתר או השרת למטה – לא שולחים בנוסף את כל ההתרעות שנובעות מזה
+inhibit_rules:
+  - source_matchers: ['alertname="SiteOrApiDown"']
+    target_matchers: ['alertname=~"ApiSlow|AircraftEndpointFailing|NoAircraftInDaytime|HealthcheckStale"']
+
+receivers:
+  - name: none
+{% if alert_email_to %}
+  - name: email
+    email_configs:
+      - to: {{ alert_email_to | to_json }}
+        send_resolved: true
+        headers:
+          Subject: '{% raw %}{{ if eq .Status "firing" }}[התרעה]{{ else }}[נפתר]{{ end }} natbag-monitor: {{ .CommonLabels.alertname }}{% endraw %}'
+        html: |
+{% raw %}
+          <div dir="rtl" style="font-family:Arial,sans-serif;font-size:15px">
+            <h2 style="margin:0 0 8px">{{ if eq .Status "firing" }}🔴 התרעה פתוחה{{ else }}✅ הבעיה נפתרה{{ end }} – מוניטור נתב"ג</h2>
+            {{ range .Alerts }}
+            <p style="margin:8px 0;padding:8px;border-right:4px solid {{ if eq .Labels.severity "critical" }}#e0533d{{ else }}#e8b23a{{ end }};background:#f6f6f6">
+              <b>{{ .Labels.alertname }}</b> ({{ .Labels.severity }})<br>
+              {{ .Annotations.summary }}<br>
+              <small>התחיל: {{ .StartsAt.Format "2006-01-02 15:04 MST" }}{{ if eq .Status "resolved" }} · נפתר: {{ .EndsAt.Format "15:04 MST" }}{{ end }}</small>
+            </p>
+            {{ end }}
+            <p><small>נשלח מ-Alertmanager במחשב הניטור. אין לראות בזה התרעה של פיקוד העורף.</small></p>
+          </div>
+{% endraw %}
+{% endif %}

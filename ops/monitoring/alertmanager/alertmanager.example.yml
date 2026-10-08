@@ -1,0 +1,7 @@
+# Alertmanager בלי מייל – רק מציג התרעות ב-http://localhost:9093
+# כדי לקבל מייל: מריצים את Ansible עם ALERT_EMAIL ו-ALERT_SMTP_PASSWORD (ראו ops/README.md),
+# והוא יוצר את alertmanager.yml עם פרטי ה-SMTP. את alertmanager.yml לא מעלים ל-GitHub.
+route:
+  receiver: none
+receivers:
+  - name: none

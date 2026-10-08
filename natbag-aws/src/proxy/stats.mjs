@@ -2,8 +2,10 @@
 // הנתונים נאספים ב-DynamoDB:
 //   stats#YYYY-MM-DD  – natbag-watcher (כל דקה): נחיתות, המראות, התרעות, מטוסים באוויר, חריגות
 //   health#YYYY-MM-DD – natbag-healthcheck (כל 5 דקות): בדיקות זמינות, כשלונות, זמני תגובה
+//   ivr#YYYY-MM-DD    – natbag-proxy (בכל פנייה מימות המשיח): שיחות, מתקשרים, שימוש בכל שלוחה
 // כאן רק מחשבים – בלי רשת – כדי שאפשר יהיה לבדוק (tests/stats.test.mjs).
 
+import { createHash } from "node:crypto";
 import { AIRLINE_NAME_BY_ICAO } from "./flights.mjs";
 
 // "YYYY-MM-DD" של היום ו-n ימים אחורה, לפי שעון ישראל
@@ -20,9 +22,39 @@ export function fromDynamo(item) {
   const o = {};
   for (const [k, v] of Object.entries(item)) {
     if (v.N != null) o[k] = Number(v.N);
+    else if (v.SS) o[k] = v.SS.length;                 // קבוצת מזהים (למשל שיחות) → כמה יש
     else if (v.S != null) o[k] = k === "lastCheck" ? JSON.parse(v.S) : v.S;
   }
   return o;
+}
+
+// ───────── קו הטלפון (ימות המשיח) ─────────
+// כל שלוחה בימות המשיח שולחת mode משלה (api_add_1=mode=...)
+export const IVR_EXT = { arrivals: "arr", departures: "dep", planes: "all", flights: "flight", root: "menu" };
+export const IVR_EXT_NAMES = { arr: "נחיתות", dep: "המראות", all: "כל המטוסים באוויר", flight: "בירור טיסה", menu: "תפריט ראשי" };
+
+/**
+ * מה לרשום על פנייה אחת מימות המשיח, או null אם אין מה לרשום.
+ * מספר הטלפון לא נשמר: רק טביעה (hash) שמשתנה כל יום, כדי לספור מתקשרים שונים בלי לדעת מי הם.
+ */
+export function ivrUsage(params, now = Date.now()) {
+  const callId = String(params?.ApiCallId || "").slice(0, 80);
+  if (!callId || params.ApiHangup === "yes") return null;
+  const date = israelDates(now, 1)[0];
+  let ext = IVR_EXT[params.mode];
+  if (!ext) ext = params.flight1 != null ? "flight" : "menu";
+  const phone = String(params.ApiPhone || "");
+  const caller = phone ? createHash("sha256").update(`${date}|${phone}`).digest("hex").slice(0, 16) : "unknown";
+  return { date, callId, caller, ext };
+}
+
+// רשומת ivr#date → סיכום
+function phoneDay(x) {
+  if (!x) return null;
+  return {
+    calls: x.calls || 0, callers: x.callers || 0, requests: x.requests || 0,
+    byExt: Object.fromEntries(Object.keys(IVR_EXT_NAMES).map(e => [e, x[`ext_${e}`] || 0])),
+  };
 }
 
 const byHour = (recs) => {
@@ -36,7 +68,7 @@ const pct = (ok, all) => (all ? Math.round((ok / all) * 10000) / 100 : null);
  * statsByDate: { "2026-10-01": dayObj|null, ... }   healthByDate: { date: healthObj|null }
  * מחזיר את מה שהדף מציג.
  */
-export function summarizeStats({ statsByDate, healthByDate, now, statsDays = 7, healthDays = 30 }) {
+export function summarizeStats({ statsByDate, healthByDate, ivrByDate = {}, now, statsDays = 7, healthDays = 30 }) {
   const sDates = israelDates(now, statsDays), hDates = israelDates(now, healthDays);
   const todayDate = sDates[sDates.length - 1];
   const t = statsByDate[todayDate] || null;
@@ -98,5 +130,11 @@ export function summarizeStats({ statsByDate, healthByDate, now, statsDays = 7, 
     days,
   };
 
-  return { generated: now, today, week, avgLandingsByHour, status };
+  // קו הטלפון: היום + 7 ימים
+  const phone = {
+    today: phoneDay(ivrByDate[todayDate]) || phoneDay({}),
+    week: sDates.map(d => ({ date: d, calls: ivrByDate[d]?.calls ?? 0 })),
+  };
+
+  return { generated: now, today, week, avgLandingsByHour, status, phone };
 }

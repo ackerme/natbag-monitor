@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recordStats, israelParts, emptyDay } from '../natbag-aws/src/watcher/index.mjs';
 import { healthUpdate } from '../natbag-aws/src/healthcheck/index.mjs';
-import { summarizeStats, israelDates, fromDynamo } from '../natbag-aws/src/proxy/stats.mjs';
+import { summarizeStats, israelDates, fromDynamo, ivrUsage } from '../natbag-aws/src/proxy/stats.mjs';
 
 const NOW = Date.UTC(2026, 9, 1, 11, 30);          // 14:30 בישראל
 const P = (id, cs, extra) => ({ icao24: id, callsign: cs, cls: 'passenger', onGround: false, isFinal: false, isDeparting: false, isAlert: false, dist: 30, ...extra });
@@ -75,4 +75,29 @@ test('summarizeStats: בלי נתונים בכלל → מצב "לא ידוע", �
   const s = summarizeStats({ statsByDate: {}, healthByDate: {}, now: NOW });
   assert.equal(s.today, null); assert.equal(s.status.state, 'unknown'); assert.equal(s.status.uptime30, null);
   assert.equal(s.avgLandingsByHour, null);
+});
+
+test('ivrUsage: שלוחה לפי mode, טלפון רק כטביעה יומית, בלי ApiCallId או בניתוק – לא רושמים', () => {
+  const u = ivrUsage({ ApiCallId: 'abc', ApiPhone: '0501234567', mode: 'arrivals' }, NOW);
+  assert.equal(u.date, '2026-10-01');
+  assert.equal(u.ext, 'arr');
+  assert.match(u.caller, /^[0-9a-f]{16}$/);
+  assert.ok(!JSON.stringify(u).includes('0501234567'));
+  assert.notEqual(ivrUsage({ ApiCallId: 'abc', ApiPhone: '0501234567' }, NOW + 864e5).caller, u.caller);  // משתנה כל יום
+  assert.equal(ivrUsage({ ApiCallId: 'x', mode: 'flights' }, NOW).ext, 'flight');
+  assert.equal(ivrUsage({ ApiCallId: 'x', flight1: '580' }, NOW).ext, 'flight');
+  assert.equal(ivrUsage({ ApiCallId: 'x' }, NOW).ext, 'menu');
+  assert.equal(ivrUsage({ mode: 'planes' }, NOW), null);
+  assert.equal(ivrUsage({ ApiCallId: 'x', ApiHangup: 'yes' }, NOW), null);
+});
+
+test('summarizeStats: קו הטלפון – היום ושבוע, קבוצות DynamoDB נספרות', () => {
+  const ivr = fromDynamo({ pk: { S: 'ivr#2026-10-01' }, calls: { SS: ['a', 'b', 'c'] }, callers: { SS: ['p1', 'p2'] },
+                          requests: { N: '11' }, ext_arr: { SS: ['a', 'b'] }, ext_flight: { SS: ['c'] } });
+  const s = summarizeStats({ statsByDate: {}, healthByDate: {}, ivrByDate: { '2026-10-01': ivr }, now: NOW });
+  assert.deepEqual(s.phone.today, { calls: 3, callers: 2, requests: 11, byExt: { arr: 2, dep: 0, all: 0, flight: 1, menu: 0 } });
+  assert.equal(s.phone.week.length, 7);
+  assert.equal(s.phone.week[6].calls, 3);
+  // בלי נתונים – אפסים ולא שגיאה
+  assert.equal(summarizeStats({ statsByDate: {}, healthByDate: {}, now: NOW }).phone.today.calls, 0);
 });
