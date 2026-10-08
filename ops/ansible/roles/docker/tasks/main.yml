@@ -1,37 +1,51 @@
 # Docker Engine + Compose מהמאגר הרשמי של Docker (Ubuntu / Debian / Raspberry Pi OS)
-- name: חבילות בסיס
-  ansible.builtin.apt:
-    name: [ca-certificates, curl, gnupg, git]
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+# אם Docker ו-Compose כבר מותקנים — מדלגים על כל שלב ההתקנה (ולא נוגעים ב-apt בכלל).
+# כך מאגר apt שבור של תוכנה אחרת במחשב לא מפיל את ה-playbook.
 
-- name: תיקיית מפתחות
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
+- name: בדיקה אם Docker Compose כבר מותקן
+  ansible.builtin.command: docker compose version
+  register: docker_compose_check
+  changed_when: false
+  failed_when: false
 
-- name: מפתח החתימה של Docker
-  ansible.builtin.get_url:
-    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
-    dest: /etc/apt/keyrings/docker.asc
-    mode: "0644"
+- name: התקנת Docker (רק אם חסר)
+  when: docker_compose_check.rc != 0
+  block:
+    - name: חבילות בסיס
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, gnupg, git, python3-debian]  # python3-debian נדרש ל-deb822_repository
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
 
-- name: מאגר Docker
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch={{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}
-      signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable
-    filename: docker
-    state: present
+    - name: תיקיית מפתחות
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
 
-- name: התקנת Docker ו-Compose
-  ansible.builtin.apt:
-    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
-    state: present
-    update_cache: true
+    - name: מפתח החתימה של Docker
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: מאגר Docker
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}"
+        suites: ["{{ ansible_facts['distribution_release'] }}"]
+        components: [stable]
+        architectures: ["{{ 'arm64' if ansible_facts['architecture'] in ['aarch64', 'arm64'] else 'amd64' }}"]
+        signed_by: /etc/apt/keyrings/docker.asc
+        state: present
+
+    - name: התקנת Docker ו-Compose
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+        state: present
+        update_cache: true
 
 - name: Docker פועל ועולה עם המחשב
   ansible.builtin.service:
@@ -41,6 +55,6 @@
 
 - name: המשתמש יכול להריץ docker בלי sudo
   ansible.builtin.user:
-    name: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+    name: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
     groups: docker
     append: true
