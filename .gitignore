@@ -10,3 +10,4 @@ ops/monitoring/.env
 *.tfvars
 !*.tfvars.example
 crash.log
+ops/monitoring/alertmanager/alertmanager.yml
