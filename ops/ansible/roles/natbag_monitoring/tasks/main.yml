@@ -8,6 +8,30 @@
       GRAFANA_ADMIN_PASSWORD='...' ansible-playbook site.yml --ask-become-pass
     quiet: true
 
+- name: האם המערך כבר הותקן בעבר במחשב הזה
+  ansible.builtin.stat:
+    path: "{{ natbag_dir }}/ops/monitoring/.env"
+  register: natbag_env_file
+
+- name: בדיקה שהפורטים פנויים (בהרצה הראשונה)
+  ansible.builtin.wait_for:
+    port: "{{ item }}"
+    host: 127.0.0.1
+    state: stopped
+    timeout: 2
+  loop: ["{{ grafana_port }}", "{{ prometheus_port }}"]
+  when: not natbag_env_file.stat.exists
+  register: natbag_ports
+  ignore_errors: true
+
+- name: פורט תפוס – עוצרים עם הסבר
+  ansible.builtin.fail:
+    msg: >-
+      הפורט {{ item.item }} כבר תפוס במחשב (כנראה Grafana או Prometheus שכבר מותקנים).
+      הריצו שוב עם פורט אחר, למשל:  -e grafana_port=3001 -e prometheus_port=9091
+  loop: "{{ natbag_ports.results | default([]) }}"
+  when: item.failed | default(false)
+
 - name: הורדת הקוד מ-GitHub (או עדכון לגרסה האחרונה)
   ansible.builtin.git:
     repo: "{{ natbag_repo }}"
@@ -38,7 +62,7 @@
 
 - name: מחכים ש-Grafana תעלה
   ansible.builtin.uri:
-    url: http://127.0.0.1:3000/api/health
+    url: "http://127.0.0.1:{{ grafana_port }}/api/health"
     status_code: 200
   register: natbag_grafana_health
   retries: 20
@@ -47,7 +71,7 @@
 
 - name: מחכים ש-Prometheus יקבל מדדים מה-exporter
   ansible.builtin.uri:
-    url: http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22natbag%22%7D
+    url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22natbag%22%7D"
     return_content: true
   register: natbag_prom_up
   retries: 20
@@ -60,5 +84,5 @@
 - name: סיכום
   ansible.builtin.debug:
     msg:
-      - "Grafana:    http://localhost:3000  (משתמש: {{ grafana_admin_user }})"
-      - "Prometheus: http://localhost:9090"
+      - "Grafana:    http://localhost:{{ grafana_port }}  (משתמש: {{ grafana_admin_user }})"
+      - "Prometheus: http://localhost:{{ prometheus_port }}"

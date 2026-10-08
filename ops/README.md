@@ -48,6 +48,11 @@ flowchart LR
    ```
 3. **פותחים בדפדפן:** Grafana ב-http://localhost:3000 (לוח הבקרה "מוניטור נתב"ג – תפעול" נפתח לבד), Prometheus ב-http://localhost:9090 (לשונית Alerts).
 
+**כבר יש Grafana או Prometheus במחשב?** ה-playbook בודק שהפורטים פנויים ועוצר עם הסבר. מריצים עם פורטים אחרים:
+```bash
+ansible-playbook site.yml --ask-become-pass -e grafana_port=3001 -e prometheus_port=9091
+```
+
 עדכון לגרסה חדשה מ-GitHub: מריצים שוב את אותה פקודת `ansible-playbook`.
 
 ## Terraform

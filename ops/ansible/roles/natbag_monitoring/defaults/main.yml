@@ -5,6 +5,9 @@ natbag_proxy_url: ""
 natbag_site_url: https://ackerme.github.io/natbag-monitor/
 natbag_prom_retention: 30d
 grafana_admin_user: admin
+# אם כבר יש Grafana או Prometheus במחשב על הפורטים הרגילים:  -e grafana_port=3001 -e prometheus_port=9091
+grafana_port: 3000
+prometheus_port: 9090
 # הסיסמה נשאלת בהרצה (vars_prompt לא נוח בתפקיד), או נשמרת מוצפנת:
 #   ansible-vault encrypt_string 'הסיסמה' --name grafana_admin_password >> group_vars/monitoring.yml
 grafana_admin_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') }}"
