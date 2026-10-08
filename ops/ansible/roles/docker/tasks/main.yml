@@ -53,8 +53,18 @@
     state: started
     enabled: true
 
+# usermod ישירות ולא מודול user: מודול user מחזיר את כל שדות המשתמש מ-/etc/passwd,
+# ושם עם תווים לא-ASCII (למשל עברית) שובר אותו ב-ansible-core החדש (strict UTF-8).
+- name: המשתמש שמריץ את ה-playbook (דרך sudo)
+  ansible.builtin.set_fact:
+    docker_target_user: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
+
+- name: בדיקת קבוצות המשתמש
+  ansible.builtin.command: "id -nG {{ docker_target_user }}"
+  register: docker_user_groups
+  changed_when: false
+
 - name: המשתמש יכול להריץ docker בלי sudo
-  ansible.builtin.user:
-    name: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
-    groups: docker
-    append: true
+  ansible.builtin.command: "usermod -aG docker {{ docker_target_user }}"
+  when: "'docker' not in docker_user_groups.stdout.split()"
+  changed_when: true
