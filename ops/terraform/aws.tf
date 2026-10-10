@@ -1,7 +1,7 @@
 # משתמש IAM לקריאה בלבד מ-CloudWatch – בשביל ה-Grafana שרצה בבית.
 # המפתח עצמו לא נוצר כאן בכוונה: מפתח שנוצר ב-Terraform נשמר כטקסט גלוי בקובץ ה-state.
 # יוצרים אותו פעם אחת ידנית (הפקודה מופיעה ב-outputs) ושומרים אותו רק ב-.env של מערך הניטור.
-
+# יוצר יוזר 
 resource "aws_iam_user" "grafana" {
   #checkov:skip=CKV_AWS_273:Grafana רצה בבית, מחוץ ל-AWS, ולכן צריכה מפתח של משתמש. ההרשאה היא קריאה בלבד, דרך קבוצה, ומוגבלת לאזור אחד
   name = "natbag-grafana-readonly"
@@ -15,11 +15,15 @@ resource "aws_iam_group" "grafana_readers" {
   name = "natbag-grafana-readers"
   path = "/natbag/"
 }
-
+# משייך את היוזר שיצרנו לקבוצה כך אתה יוצר קובצה אחת אם הרשאות ספציפיות ומשייך להם יוזרים
 resource "aws_iam_user_group_membership" "grafana" {
   user   = aws_iam_user.grafana.name
   groups = [aws_iam_group.grafana_readers.name]
 }
+# מעניק הרשאה לשלוף נתוני מטריקות בכמות גדולה מ-CloudWatch (משמש לציור הגרפים ב-Grafana).
+# מעניק הרשאה לשלוף סטטיסטיקות מקובצות על מטריקות (כגון ממוצע, מקסימום, מינימום וסכום).
+# מעניק הרשאה להציג ולסקור את רשימת כל המטריקות הקיימות בחשבון ה-AWS (מאפשר ל-Grafana להציע לך מטריקות לבחירה).
+# מעניק הרשאה לצפות בהתראות (Alarms) המשויכות למטריקה מסוימת ב-CloudWatch.
 
 data "aws_iam_policy_document" "grafana_cloudwatch_read" {
   statement {
