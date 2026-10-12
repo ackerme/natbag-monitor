@@ -1,0 +1,5 @@
+- name: הפעלה מחדש של הממסר
+  ansible.builtin.command:
+    cmd: docker compose up -d --build --force-recreate
+    chdir: "{{ natbag_dir }}/ops/relay"
+  changed_when: true

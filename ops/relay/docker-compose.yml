@@ -1,0 +1,18 @@
+# ממסר השמע של שלוחה 5 (קולות הקשר מ-LiveATC, באישורם)
+# הפעלה:  docker compose up -d --build      בדיקה:  curl -s http://localhost:8000/healthz
+# לחשיפה לאינטרנט (בשביל ימות המשיח) – Tailscale Funnel, ראו ops/relay/README.md
+name: natbag-relay
+
+services:
+  relay:
+    build: .
+    environment:
+      UPSTREAM_URL: ${UPSTREAM_URL:-http://d.liveatc.net/llbg2}
+      MOUNT: /llbg.mp3
+      ALWAYS_ON: ${ALWAYS_ON:-true}   # מחובר תמיד: שמע מיידי למתקשר ולבדיקת הקישור של ימות המשיח
+    ports: ["${RELAY_BIND:-127.0.0.1}:${RELAY_PORT:-8000}:8000"]
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    mem_limit: 128m

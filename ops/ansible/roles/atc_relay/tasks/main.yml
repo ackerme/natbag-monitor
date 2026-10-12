@@ -1,0 +1,66 @@
+- name: הורדת הקוד מ-GitHub (או עדכון לגרסה האחרונה)
+  ansible.builtin.git:
+    repo: "{{ natbag_repo }}"
+    dest: "{{ natbag_dir }}"
+    version: "{{ natbag_version }}"
+    depth: 1
+    force: true
+  notify: הפעלה מחדש של הממסר
+
+- name: הגדרות הממסר (.env)
+  ansible.builtin.template:
+    src: relay.env.j2
+    dest: "{{ natbag_dir }}/ops/relay/.env"
+    owner: "{{ docker_target_user | default(omit) }}"
+    mode: "0644"
+  notify: הפעלה מחדש של הממסר
+
+- name: הפעלת הממסר
+  ansible.builtin.command:
+    cmd: docker compose up -d --build
+    chdir: "{{ natbag_dir }}/ops/relay"
+  register: relay_up
+  changed_when: "'Started' in relay_up.stderr or 'Created' in relay_up.stderr"
+
+- name: אם השתנו הגדרות – מפעילים מחדש
+  ansible.builtin.meta: flush_handlers
+
+- name: מחכים שהממסר יענה
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ relay_port }}/healthz"
+  register: relay_health
+  retries: 15
+  delay: 2
+  until: relay_health.status == 200
+
+# ---- Tailscale: כתובת https קבועה מהאינטרנט, בלי לפתוח פורטים בראוטר ----
+- name: התקנת Tailscale
+  when: relay_tailscale
+  block:
+    - name: מפתח החתימה של Tailscale
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/{{ ansible_facts['distribution'] | lower }}/{{ ansible_facts['distribution_release'] }}.noarmor.gpg"
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
+
+    - name: מאגר Tailscale
+      ansible.builtin.deb822_repository:
+        name: tailscale
+        types: [deb]
+        uris: "https://pkgs.tailscale.com/stable/{{ ansible_facts['distribution'] | lower }}"
+        suites: ["{{ ansible_facts['distribution_release'] }}"]
+        components: [main]
+        signed_by: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        state: present
+
+    - name: חבילת Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: true
+
+- name: סיכום
+  ansible.builtin.debug:
+    msg:
+      - "הממסר רץ: http://127.0.0.1:{{ relay_port }}/llbg.mp3  (מצב: /healthz)"
+      - "{{ 'פעם אחת: sudo tailscale up  ואז  sudo tailscale funnel --bg ' ~ relay_port ~ '   – הכתובת לימות המשיח: https://<שם-המכונה>.<tailnet>.ts.net/llbg.mp3' if relay_tailscale else 'Tailscale כבוי (relay_tailscale: false)' }}"

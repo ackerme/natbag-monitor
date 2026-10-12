@@ -1,0 +1,10 @@
+# ממסר השמע של שלוחה 5 (קולות הקשר מ-LiveATC, באישורם)
+natbag_dir: /opt/natbag-monitor
+natbag_repo: https://github.com/ackerme/natbag-monitor.git
+natbag_version: main
+relay_upstream_url: http://d.liveatc.net/llbg2
+relay_port: 8000
+# 127.0.0.1 = רק מהמכונה עצמה (נחשף לאינטרנט דרך Tailscale Funnel). 0.0.0.0 = גם מהרשת (למשל הפניית פורט בראוטר)
+relay_bind: 127.0.0.1
+# התקנת Tailscale (את ההתחברות והפעלת Funnel עושים פעם אחת ידנית – ראו ops/relay/README.md)
+relay_tailscale: true

@@ -1,0 +1,9 @@
+# ממסר השמע של שלוחה 5 – על מכונה וירטואלית (VirtualBox) או שרת בענן
+#   ansible-playbook relay.yml --ask-become-pass
+# המכונה מוגדרת בקבוצה [relay] ב-inventory.ini
+- name: ממסר קולות הקשר (LiveATC → ימות המשיח)
+  hosts: relay
+  become: true
+  roles:
+    - docker
+    - atc_relay
