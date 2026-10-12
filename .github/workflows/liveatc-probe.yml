@@ -1,0 +1,31 @@
+# אבחון: האם שידור LiveATC נגיש משרת במרכז נתונים (כמו שרתי ימות המשיח או AWS), ולא רק מהבית?
+# מריצים ידנית: Actions → LiveATC probe → Run workflow. התוצאה בסיכום הריצה.
+name: LiveATC probe
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: בדיקה
+        shell: bash
+        run: |
+          UA="natbag-monitor-relay/1.0 (+https://ackerme.github.io/natbag-monitor/)"
+          {
+            echo "## LiveATC מ-GitHub (מרכז נתונים)"
+            echo '```'
+            echo "--- הפניה מ-d.liveatc.net (HEAD):"
+            curl -sSI --max-time 10 -A "$UA" http://d.liveatc.net/llbg2 | grep -iE '^(HTTP|location|content-type|server)' || echo "נכשל"
+            echo "--- 15 שניות של שידור (GET, עוקב אחרי הפניה):"
+            curl -sSL --max-time 15 -A "$UA" -o /tmp/a.mp3 -w 'HTTP %{http_code}  final=%{url_effective}  bytes=%{size_download}\n' http://d.liveatc.net/llbg2 || true
+            echo "--- HEAD ישירות לשרת השידור:"
+            FINAL=$(curl -sSL --max-time 8 -A "$UA" -o /dev/null -w '%{url_effective}' http://d.liveatc.net/llbg2 2>/dev/null | sed 's/?.*//')
+            echo "$FINAL"
+            curl -sSI --max-time 8 -A "$UA" "$FINAL" | grep -iE '^(HTTP|content-type|server|icy)' || echo "HEAD נכשל (ייתכן ששרת השידור לא תומך ב-HEAD)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

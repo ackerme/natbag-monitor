@@ -1,0 +1,51 @@
+# בדיקת זמינות מבחוץ, 24/7, בחינם – בלי שרת.
+# GitHub מריץ את זה כל 10 דקות. אם בדיקה נכשלת – הריצה נכשלת, ו-GitHub שולח מייל
+# למי שערך לאחרונה את שורת ה-cron (הגדרה: Settings → Notifications → Actions → "Only notify for failed workflows").
+# הערה: GitHub עלול לאחר ריצות מתוזמנות בכמה דקות, ומשבית אותן אחרי 60 יום בלי שינויים ב-repo.
+name: Uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}          # הרצה ידנית מלשונית Actions
+
+permissions: {}                  # לא צריך גישה לשום דבר ב-repo
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: האתר והשרת עונים
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SITE: https://ackerme.github.io/natbag-monitor/
+      API: https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws
+    steps:
+      - name: בדיקות
+        shell: bash
+        run: |
+          fail=0
+          check() {   # שם, כתובת, תנאי jq על התשובה (לא חובה)
+            local name="$1" url="$2" cond="${3:-}" body code t
+            body=$(mktemp)
+            read -r code t < <(curl -sS -o "$body" -w '%{http_code} %{time_total}' --max-time 20 --retry 2 --retry-delay 5 "$url" || echo "000 0")
+            if [ "$code" != "200" ]; then
+              echo "::error title=$name::HTTP $code ($url)"; fail=1
+            elif [ -n "$cond" ] && ! jq -e "$cond" "$body" >/dev/null 2>&1; then
+              echo "::error title=$name::התשובה לא תקינה ($url)"; fail=1
+            else
+              echo "✅ $name – ${t}s"
+            fi
+            echo "| $name | $code | ${t}s |" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo "| בדיקה | HTTP | זמן |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          check "האתר"            "$SITE"
+          check "השרת (health)"   "$API/health"  '.ok == true'
+          check "נתוני מטוסים"    "$API/aircraft" '(.ac // .aircraft // []) | type == "array"'
+          # בדיקת הזמינות ב-AWS רצה כל 5 דקות – אם לא רצה 20 דקות, משהו נתקע
+          check "בדיקת AWS רצה"   "$API/stats"   '.status.lastCheck.t > (now * 1000 - 20 * 60 * 1000)'
+          exit $fail

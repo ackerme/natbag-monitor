@@ -98,6 +98,11 @@ jobs:
           grep -v '^GRAFANA_ADMIN_PASSWORD=' env.example > .env && echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> .env
           docker compose config --quiet
           docker compose build exporter
+      - name: ממסר השמע – תקינות + בנייה
+        working-directory: ops/relay
+        run: |
+          docker compose config --quiet
+          docker compose build
       - name: Grafana – לוח הבקרה הוא JSON תקין
         run: python3 -c "import json; json.load(open('ops/monitoring/grafana/dashboards/natbag-ops.json'))"
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
@@ -115,7 +120,8 @@ jobs:
         run: |
           pip install --quiet ansible-core==2.17.* ansible-lint==24.*
           ansible-playbook site.yml --syntax-check
-          ansible-lint -c ansible-lint.yml site.yml
+          ansible-playbook relay.yml --syntax-check
+          ansible-lint -c ansible-lint.yml site.yml relay.yml
 
   deploy-staging:
     name: פריסה ל-staging
