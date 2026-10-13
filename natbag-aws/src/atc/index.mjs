@@ -33,7 +33,7 @@ export function authorized(query, token, path = "") {
  * מזרים את השידור אל out (Writable) עד שהמאזין מתנתק או עד maxMs.
  * אם השידור של LiveATC נופל באמצע – מתחבר מחדש.
  */
-export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, prefill = true, log = () => {} }) {
+export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, prefill = true, burstSeconds = 8, log = () => {} }) {
   const ctrl = new AbortController();      // כל השיחה
   let closed = false;
   const stop = () => { closed = true; ctrl.abort(); };
@@ -51,7 +51,9 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
       // עד שמגיע שמע אמיתי – שקט, כדי שהקו לא יחשוב שאין שידור
       let filler = null;
       if (prefill) {
-        if (connects === 0) for (let i = 0; i < 20; i++) out.write(SILENT_FRAME);   // ~half a second מיד
+        // בהתחלה: כמה שניות שקט בבת אחת (כמו ה-burst של שרתי Icecast), כדי ש-ffmpeg של ימות המשיח
+        // יסיים לנתח את השידור מיד ולא יחכה בזמן אמת עד שיעבור timeout של בדיקת הקישור
+        if (connects === 0) out.write(Buffer.concat(Array(Math.ceil((burstSeconds * 1000) / FRAME_MS)).fill(SILENT_FRAME)));
         filler = setInterval(() => { if (!closed) out.write(SILENT_FRAME); }, FRAME_MS);
       }
       const stopFiller = () => { if (filler) { clearInterval(filler); filler = null; } };
@@ -113,6 +115,7 @@ async function main(event, responseStream) {
       out: s,
       upstream: process.env.UPSTREAM_URL || "http://d.liveatc.net/llbg2",
       maxMs: Number(process.env.MAX_MS || 14 * 60_000),
+      burstSeconds: Number(process.env.BURST_SECONDS || 8),
       log,
     });
     log("שיחה הסתיימה", { seconds: Math.round((Date.now() - t0) / 1000), ...res });
