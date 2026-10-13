@@ -63,4 +63,8 @@
   ansible.builtin.debug:
     msg:
       - "הממסר רץ: http://127.0.0.1:{{ relay_port }}/llbg.mp3  (מצב: /healthz)"
-      - "{{ 'פעם אחת: sudo tailscale up  ואז  sudo tailscale funnel --bg ' ~ relay_port ~ '   – הכתובת לימות המשיח: https://<שם-המכונה>.<tailnet>.ts.net/llbg.mp3' if relay_tailscale else 'Tailscale כבוי (relay_tailscale: false)' }}"
+      - "{{ relay_tailscale_hint if relay_tailscale else 'Tailscale כבוי (relay_tailscale: false)' }}"
+  vars:
+    relay_tailscale_hint: >-
+      פעם אחת: sudo tailscale up ואז sudo tailscale funnel --bg {{ relay_port }} –
+      הכתובת לימות המשיח: https://<שם-המכונה>.<tailnet>.ts.net/llbg.mp3

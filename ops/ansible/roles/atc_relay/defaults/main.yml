@@ -4,6 +4,8 @@ natbag_repo: https://github.com/ackerme/natbag-monitor.git
 natbag_version: main
 relay_upstream_url: http://d.liveatc.net/llbg2
 relay_port: 8000
+# true = מחובר ל-LiveATC תמיד (שמע מיידי). false = מתחבר רק כשמישהו מאזין (מתקשר לשלוחה 5), ומתנתק 30 שניות אחרי שניתק
+relay_always_on: true
 # 127.0.0.1 = רק מהמכונה עצמה (נחשף לאינטרנט דרך Tailscale Funnel). 0.0.0.0 = גם מהרשת (למשל הפניית פורט בראוטר)
 relay_bind: 127.0.0.1
 # התקנת Tailscale (את ההתחברות והפעלת Funnel עושים פעם אחת ידנית – ראו ops/relay/README.md)
