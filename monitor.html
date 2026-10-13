@@ -185,6 +185,7 @@ header h1 a{text-decoration:none;color:inherit}
   body.cfg-open .cfg{display:flex}
   #btnCfg{display:inline-block}
   #btnT,#btnD{flex:1}
+  #atc{order:4}
   #lp,#cp,#rp{display:none!important;width:100%!important;border:0!important}
   body[data-tab=lp] #lp,body[data-tab=rp] #rp{display:flex!important;flex:1}
   body[data-tab=cp] #cp{display:block!important;flex:1}
@@ -197,6 +198,24 @@ header h1 a{text-decoration:none;color:inherit}
   #det .gr b{font-size:.85rem}
   #airAlert{top:128px;padding:10px 12px}
 }
+/* ---- קולות הקשר (LiveATC) ---- */
+#atc{display:flex;align-items:center;gap:8px;padding:4px 12px 4px 10px;border:1px solid var(--rule);border-radius:2px;background:var(--deep);
+  color:var(--dim);cursor:pointer;font-size:.82rem;white-space:nowrap;transition:border-color .2s,color .2s}
+#atc:hover{color:var(--ink);border-color:var(--dim)}
+#atc svg{width:18px;height:18px;flex-shrink:0}
+#atc .lv{display:flex;align-items:flex-end;gap:2px;height:14px;width:22px}
+#atc .lv i{display:block;width:3px;height:3px;background:currentColor;opacity:.35}
+#atc .tx{width:6px;height:6px;border-radius:50%;background:var(--faint)}
+#atc.wait{border-color:var(--amber);color:var(--amber)} #atc.wait .tx{background:var(--amber);animation:blink 1s steps(2) infinite}
+#atc.live{border-color:var(--amber);color:var(--amber);background:#e8b23a14}
+#atc.live .tx{background:var(--alarm);box-shadow:0 0 0 3px #e0533d33}
+#atc.live .lv i{opacity:1;animation:lvl 900ms ease-in-out infinite alternate}
+#atc.live .lv i:nth-child(2){animation-delay:-300ms;animation-duration:700ms}
+#atc.live .lv i:nth-child(3){animation-delay:-600ms;animation-duration:1100ms}
+#atc.live .lv i:nth-child(4){animation-delay:-150ms;animation-duration:800ms}
+#atc.err{border-color:var(--alarm);color:var(--alarm)} #atc.err .tx{background:var(--alarm)}
+@media (min-width:761px) and (max-width:1599px){#atc .lbl{display:none} #atc{padding:4px 8px}}
+@keyframes lvl{0%{height:3px}50%{height:9px}100%{height:14px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 </head>
@@ -219,6 +238,11 @@ header h1 a{text-decoration:none;color:inherit}
     <button id="btnD">הדגמה</button>
     <button id="btnCfg" title="הגדרות">הגדרות</button>
   </div>
+  <button id="atc" type="button" aria-pressed="false" title="קולות הקשר של נתב&quot;ג בשידור חי (מגדל, קרקע וגישה) · באדיבות LiveATC.net">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 13v8M9 21h6"/><circle cx="12" cy="10" r="2.2"/><path d="M7.8 5.8a6 6 0 0 0 0 8.4M16.2 5.8a6 6 0 0 1 0 8.4M5 3a10 10 0 0 0 0 14M19 3a10 10 0 0 1 0 14"/></svg>
+    <span class="lbl">קשר מגדל</span>
+    <span class="lv" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="tx" aria-hidden="true"></span>
+  </button>
   <div class="stamp"><span id="dot"></span><span id="lastUp">לא עודכן</span><span id="nextUp"></span><span id="clock" title="שעון אוניברסלי">--:--:--Z</span></div>
 </header>
 
@@ -1209,6 +1233,28 @@ document.querySelectorAll('#mtabs button').forEach(b=>b.addEventListener('click'
   if(t==='rp' && map) setTimeout(()=>{ map.invalidateSize(); if(!mapShown){ map.setView([TLV_LAT,TLV_LON],10); mapShown=true; } },30);
 }));
 document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.classList.toggle('cfg-open'); setTimeout(resizeGlobe,30); });
+
+// ===================== ATC RADIO (LiveATC, באישורם) =====================
+// מנגן את שידור LiveATC של נתב"ג ישירות בדפדפן. כמה שרתים לגיבוי: אם אחד לא עונה – עוברים לבא.
+{
+  const SRC=['https://d.liveatc.net/llbg2','https://s1-bos.liveatc.net/llbg2','https://s1-fmt2.liveatc.net/llbg2'];
+  const btn=document.getElementById('atc'), lbl=btn.querySelector('.lbl');
+  let audio=null, idx=0, tmo=null;
+  const set=(st,text)=>{ btn.className=st; lbl.textContent=text; btn.setAttribute('aria-pressed',String(st==='live'||st==='wait')); document.body.classList.toggle('atc-on',st==='live'); };
+  const stop=()=>{ clearTimeout(tmo); if(audio){ audio.pause(); audio.removeAttribute('src'); audio.load(); audio=null; } set('','קשר מגדל'); };
+  const tryNext=()=>{
+    clearTimeout(tmo);
+    if(idx>=SRC.length){ stop(); set('err','השידור לא זמין'); setTimeout(()=>{ if(btn.className==='err') set('','קשר מגדל'); },4000); return; }
+    const a=new Audio(); audio=a; a.preload='none';
+    a.src=SRC[idx++]+'?nocache='+Date.now();
+    a.addEventListener('playing',()=>{ if(audio===a){ clearTimeout(tmo); set('live','חי · LiveATC'); } });
+    a.addEventListener('waiting',()=>{ if(audio===a && btn.className==='live') set('wait','קולט…'); });
+    a.addEventListener('error',()=>{ if(audio===a) tryNext(); });
+    tmo=setTimeout(()=>{ if(audio===a && btn.className!=='live') tryNext(); },9000);
+    a.play().catch(()=>{ if(audio===a) tryNext(); });
+  };
+  btn.addEventListener('click',()=>{ if(audio){ stop(); return; } idx=0; set('wait','מתחבר…'); tryNext(); });
+}
 
 // ===================== INIT =====================
 { const ck=document.getElementById('clock'); const t=()=>{ ck.textContent=new Date().toISOString().slice(11,19)+'Z'; }; t(); setInterval(t,1000); }
