@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { pump, authorized } from '../natbag-aws/src/atc/index.mjs';
+import { pump, authorized, atcKey, SILENT_FRAME, INTRO, HISS } from '../natbag-aws/src/atc/index.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -65,4 +65,46 @@ test('pump: LiveATC לא זמין בהתחלה – מנסה שוב ומזרים'
   const res = await pump({ out, upstream: 'u', maxMs: 150, retryMs: 20, fetchImpl: f.impl });
   assert.equal(res.connects, 2);
   assert.ok(out.chunks.length > 0);
+});
+
+test('pump: LiveATC לא שולח כלום – מוותר אחרי stallMs ומנסה שוב (לא נתקע 14 דקות)', async () => {
+  let n = 0;
+  const hang = async (url, opts) => {
+    n++;
+    return await new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(new Error('aborted'))));
+  };
+  const out = fakeOut(), logs = [];
+  await pump({ out, upstream: 'u', maxMs: 200, stallMs: 50, retryMs: 10, fetchImpl: hang, log: (m, x) => logs.push([m, x]) });
+  assert.ok(n >= 2, `attempts=${n}`);
+  assert.ok(logs.some(([m, x]) => /נפל/.test(m) && /אין מידע/.test(x.error)));
+});
+
+test('atcKey: 24 תווים, רק אותיות ומספרים, נגזר מהסיסמה; מאשר בנתיב /<key>.mp3', () => {
+  const k = atcKey('a+b&c#d=e!');
+  assert.match(k, /^[0-9a-f]{24}$/);
+  assert.equal(k, atcKey('a+b&c#d=e!'));
+  assert.notEqual(k, atcKey('other'));
+  assert.equal(authorized({}, 'a+b&c#d=e!', `/${k}.mp3`), true);
+  assert.equal(authorized({ key: k }, 'a+b&c#d=e!', '/llbg.mp3'), true);
+  assert.equal(authorized({}, 'a+b&c#d=e!', '/llbg.mp3'), false);
+  assert.equal(authorized({}, 'a+b&c#d=e!', `/${k.slice(1)}.mp3`), false);
+});
+
+test('pump: פתיחה מיידית ורחש עד שמגיע שמע מ-LiveATC (כדי שימות המשיח תזהה שידור)', async () => {
+  assert.deepEqual([...SILENT_FRAME.subarray(0, 4)], [0xff, 0xfb, 0x10, 0xc0]);
+  // קובצי הפתיחה: MP3 אמיתי (מתחיל בסנכרון פריים), ~8 שניות ו-~1 שנייה ב-32kbps
+  assert.equal(INTRO[0], 0xff); assert.equal(INTRO[1] & 0xe0, 0xe0);
+  assert.ok(INTRO.length > 28_000 && INTRO.length < 40_000, `intro=${INTRO.length}`);
+  assert.ok(HISS.length > 3_000 && HISS.length < 5_000, `hiss=${HISS.length}`);
+  const intro = Buffer.from('INTRO'), filler = Buffer.from('HISS');
+  const slow = async (url, opts) => { await sleep(120); return fakeFetch().impl(url, opts); };   // LiveATC עונה אחרי 120ms
+  const out = fakeOut();
+  const p = pump({ out, upstream: 'u', maxMs: 300, fetchImpl: slow, intro, filler, fillerMs: 20 });
+  await sleep(5);
+  assert.ok(out.chunks[0].equals(intro), 'הפתיחה נשלחה מיד');
+  await p;
+  const firstReal = out.chunks.findIndex(c => c.toString() === 'MP3');
+  assert.ok(firstReal > 1, 'רחש בזמן ההמתנה');
+  assert.ok(out.chunks.slice(1, firstReal).every(c => c.equals(filler)));
+  assert.ok(out.chunks.slice(firstReal).every(c => c.toString() === 'MP3'), 'הרחש נפסק כשהשמע מתחיל');
 });

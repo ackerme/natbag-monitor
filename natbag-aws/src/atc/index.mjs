@@ -9,6 +9,7 @@
 //   ATC_KEY = 24 התווים הראשונים של sha256("atc:" + IVR_TOKEN) – רק אותיות ומספרים, נגזר מסיסמת הקו
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const UA = "natbag-monitor-atc/1.0 (+https://ackerme.github.io/natbag-monitor/)";
 
@@ -16,6 +17,13 @@ const UA = "natbag-monitor-atc/1.0 (+https://ackerme.github.io/natbag-monitor/)"
 // נשלח מיד עם החיבור ובזמן ההמתנה ל-LiveATC, כדי שימות המשיח תקבל שמע תוך אלפיות שנייה.
 export const SILENT_FRAME = Buffer.concat([Buffer.from([0xff, 0xfb, 0x10, 0xc0]), Buffer.alloc(100)]);
 const FRAME_MS = 26;
+
+// פתיחה (~8 שניות): צליל פתיחת ערוץ קשר + רחש רדיו שקט, ורחש של שנייה לזמן ההמתנה ל-LiveATC.
+// MP3 באותו פורמט בדיוק של LiveATC (44.1kHz, מונו, 32kbps, בלי bit reservoir – כל פריים עצמאי).
+// לא שקט מוחלט: בדיקת הקישור של ימות המשיח כנראה דוחה שידור שאין בו קול. נוצר עם ffmpeg (ראו README).
+const load = (name, fallback) => { try { return readFileSync(new URL(`./${name}`, import.meta.url)); } catch { return fallback; } };
+export const INTRO = load("intro.mp3", Buffer.concat(Array(308).fill(SILENT_FRAME)));
+export const HISS = load("hiss.mp3", Buffer.concat(Array(38).fill(SILENT_FRAME)));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export function atcKey(token) {
@@ -33,7 +41,8 @@ export function authorized(query, token, path = "") {
  * מזרים את השידור אל out (Writable) עד שהמאזין מתנתק או עד maxMs.
  * אם השידור של LiveATC נופל באמצע – מתחבר מחדש.
  */
-export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, prefill = true, burstSeconds = 8, log = () => {} }) {
+export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, prefill = true,
+                             intro = INTRO, filler = HISS, fillerMs = 1000, log = () => {} }) {
   const ctrl = new AbortController();      // כל השיחה
   let closed = false;
   const stop = () => { closed = true; ctrl.abort(); };
@@ -49,14 +58,14 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
       ctrl.signal.addEventListener("abort", onAbort, { once: true });
       let stall = setTimeout(() => attempt.abort(), stallMs);
       // עד שמגיע שמע אמיתי – שקט, כדי שהקו לא יחשוב שאין שידור
-      let filler = null;
+      let fillTimer = null;
       if (prefill) {
-        // בהתחלה: כמה שניות שקט בבת אחת (כמו ה-burst של שרתי Icecast), כדי ש-ffmpeg של ימות המשיח
+        // בהתחלה: כמה שניות בבת אחת (כמו ה-burst של שרתי Icecast), כדי ש-ffmpeg של ימות המשיח
         // יסיים לנתח את השידור מיד ולא יחכה בזמן אמת עד שיעבור timeout של בדיקת הקישור
-        if (connects === 0) out.write(Buffer.concat(Array(Math.ceil((burstSeconds * 1000) / FRAME_MS)).fill(SILENT_FRAME)));
-        filler = setInterval(() => { if (!closed) out.write(SILENT_FRAME); }, FRAME_MS);
+        if (connects === 0) out.write(intro);
+        fillTimer = setInterval(() => { if (!closed) out.write(filler); }, fillerMs);
       }
-      const stopFiller = () => { if (filler) { clearInterval(filler); filler = null; } };
+      const stopFiller = () => { if (fillTimer) { clearInterval(fillTimer); fillTimer = null; } };
       try {
         connects++;
         const r = await fetchImpl(upstream, { redirect: "follow", headers: { "User-Agent": UA }, signal: attempt.signal });
@@ -107,7 +116,15 @@ async function main(event, responseStream) {
     }
     const s = awslambda.HttpResponseStream.from(responseStream, {
       statusCode: 200,
-      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-cache, no-store" },
+      // כותרות icy-* כמו בשרתי רדיו (Icecast/Shoutcast) – יש נגנים ובודקים שמזהים "שידור" לפיהן
+      headers: {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "no-cache, no-store",
+        "icy-br": "32",
+        "icy-pub": "0",
+        "icy-name": "LLBG Tower - natbag-monitor",
+        "icy-description": "Ben Gurion ATC audio courtesy of LiveATC.net",
+      },
     });
     if (method === "HEAD") { s.end(); return; }
     const t0 = Date.now();
@@ -115,7 +132,6 @@ async function main(event, responseStream) {
       out: s,
       upstream: process.env.UPSTREAM_URL || "http://d.liveatc.net/llbg2",
       maxMs: Number(process.env.MAX_MS || 14 * 60_000),
-      burstSeconds: Number(process.env.BURST_SECONDS || 8),
       log,
     });
     log("שיחה הסתיימה", { seconds: Math.round((Date.now() - t0) / 1000), ...res });
