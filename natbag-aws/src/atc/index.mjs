@@ -55,30 +55,37 @@ const log = (msg, extra = {}) => console.log(JSON.stringify({ msg, ...extra }));
 
 async function main(event, responseStream) {
   const method = event?.requestContext?.http?.method || "GET";
+  const path = event?.rawPath || "/";
   const query = event?.queryStringParameters || {};
-  if (!authorized(query, process.env.IVR_TOKEN || "")) {
-    const s = awslambda.HttpResponseStream.from(responseStream, { statusCode: 403, headers: { "Content-Type": "text/plain" } });
-    s.end("forbidden");
-    return;
+  const ok = authorized(query, process.env.IVR_TOKEN || "");
+  log("בקשה", { method, path, token: query.token ? "יש" : "אין", authorized: ok });
+  try {
+    if (!ok) {
+      const s = awslambda.HttpResponseStream.from(responseStream, { statusCode: 403, headers: { "Content-Type": "text/plain" } });
+      s.write("forbidden");
+      s.end();
+      return;
+    }
+    const s = awslambda.HttpResponseStream.from(responseStream, {
+      statusCode: 200,
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-cache, no-store" },
+    });
+    if (method === "HEAD") { s.end(); return; }
+    const t0 = Date.now();
+    const res = await pump({
+      out: s,
+      upstream: process.env.UPSTREAM_URL || "http://d.liveatc.net/llbg2",
+      maxMs: Number(process.env.MAX_MS || 14 * 60_000),
+      log,
+    });
+    log("שיחה הסתיימה", { seconds: Math.round((Date.now() - t0) / 1000), ...res });
+  } catch (e) {
+    // שגיאות בפונקציית streaming לא תמיד נרשמות לבד – רושמים בעצמנו
+    console.error(JSON.stringify({ msg: "שגיאה", error: String(e?.stack || e) }));
+    throw e;
   }
-  const s = awslambda.HttpResponseStream.from(responseStream, {
-    statusCode: 200,
-    headers: {
-      "Content-Type": "audio/mpeg",
-      "Cache-Control": "no-cache, no-store",
-      "icy-name": "LLBG Gnd/Twr/App - audio courtesy of LiveATC.net",
-    },
-  });
-  if (method === "HEAD") { s.end(); return; }
-  const t0 = Date.now();
-  const res = await pump({
-    out: s,
-    upstream: process.env.UPSTREAM_URL || "http://d.liveatc.net/llbg2",
-    maxMs: Number(process.env.MAX_MS || 14 * 60_000),
-    log,
-  });
-  log("שיחה הסתיימה", { seconds: Math.round((Date.now() - t0) / 1000), ...res });
 }
 
 // awslambda קיים רק בסביבת Lambda (לא בבדיקות)
+if (process.env.AWS_LAMBDA_FUNCTION_NAME) log("init", { streaming: typeof awslambda !== "undefined" });
 export const handler = typeof awslambda !== "undefined" ? awslambda.streamifyResponse(main) : main;
