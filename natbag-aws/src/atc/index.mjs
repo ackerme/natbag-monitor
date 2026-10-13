@@ -4,21 +4,36 @@
 // ומזרימה אותו (Response Streaming) עד שהשיחה נגמרת או עד MAX_MS (Lambda מוגבלת ל-15 דקות).
 // אין שרת שרץ כל הזמן, ובתוך ה-Free Tier של Lambda זה בחינם.
 //
-//   GET  <url>?token=<IVR_TOKEN>   → audio/mpeg
-//   HEAD <url>?token=<IVR_TOKEN>   → 200 בלי גוף (לבדיקת הקישור)
+//   GET  <url>/<ATC_KEY>.mp3         → audio/mpeg   (הכתובת לימות המשיח – בלי סימנים מיוחדים)
+//   GET  <url>/llbg.mp3?token=<IVR_TOKEN> → אותו דבר
+//   ATC_KEY = 24 התווים הראשונים של sha256("atc:" + IVR_TOKEN) – רק אותיות ומספרים, נגזר מסיסמת הקו
+
+import { createHash } from "node:crypto";
 
 const UA = "natbag-monitor-atc/1.0 (+https://ackerme.github.io/natbag-monitor/)";
+
+// פריים MP3 שקט (MPEG-1 Layer III, 32kbps, 44.1kHz, מונו – 104 בתים, 26ms).
+// נשלח מיד עם החיבור ובזמן ההמתנה ל-LiveATC, כדי שימות המשיח תקבל שמע תוך אלפיות שנייה.
+export const SILENT_FRAME = Buffer.concat([Buffer.from([0xff, 0xfb, 0x10, 0xc0]), Buffer.alloc(100)]);
+const FRAME_MS = 26;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export function authorized(query, token) {
-  return !token || (!!query && query.token === token);
+export function atcKey(token) {
+  return createHash("sha256").update(`atc:${token}`).digest("hex").slice(0, 24);
+}
+
+export function authorized(query, token, path = "") {
+  if (!token) return true;
+  if (query && query.token === token) return true;
+  const key = atcKey(token);
+  return (!!query && query.key === key) || path === `/${key}.mp3`;
 }
 
 /**
  * מזרים את השידור אל out (Writable) עד שהמאזין מתנתק או עד maxMs.
  * אם השידור של LiveATC נופל באמצע – מתחבר מחדש.
  */
-export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, log = () => {} }) {
+export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, prefill = true, log = () => {} }) {
   const ctrl = new AbortController();      // כל השיחה
   let closed = false;
   const stop = () => { closed = true; ctrl.abort(); };
@@ -33,6 +48,13 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
       const onAbort = () => attempt.abort();
       ctrl.signal.addEventListener("abort", onAbort, { once: true });
       let stall = setTimeout(() => attempt.abort(), stallMs);
+      // עד שמגיע שמע אמיתי – שקט, כדי שהקו לא יחשוב שאין שידור
+      let filler = null;
+      if (prefill) {
+        if (connects === 0) for (let i = 0; i < 20; i++) out.write(SILENT_FRAME);   // ~half a second מיד
+        filler = setInterval(() => { if (!closed) out.write(SILENT_FRAME); }, FRAME_MS);
+      }
+      const stopFiller = () => { if (filler) { clearInterval(filler); filler = null; } };
       try {
         connects++;
         const r = await fetchImpl(upstream, { redirect: "follow", headers: { "User-Agent": UA }, signal: attempt.signal });
@@ -42,7 +64,7 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
         for await (const chunk of r.body) {
           if (closed) break;
           clearTimeout(stall); stall = setTimeout(() => attempt.abort(), stallMs);
-          if (first) { log("מתחיל להזרים"); first = false; }
+          if (first) { stopFiller(); log("מתחיל להזרים"); first = false; }
           bytes += chunk.length;
           out.write(chunk);
         }
@@ -52,6 +74,7 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
         log("השידור נפל – מתחברים שוב", { error: attempt.signal.aborted ? `אין מידע ${stallMs / 1000} שניות` : String(e?.message || e) });
         await sleep(retryMs);
       } finally {
+        stopFiller();
         clearTimeout(stall);
         ctrl.signal.removeEventListener("abort", onAbort);
       }
@@ -69,8 +92,10 @@ async function main(event, responseStream) {
   const method = event?.requestContext?.http?.method || "GET";
   const path = event?.rawPath || "/";
   const query = event?.queryStringParameters || {};
-  const ok = authorized(query, process.env.IVR_TOKEN || "");
-  log("בקשה", { method, path, token: query.token ? "יש" : "אין", authorized: ok });
+  const ok = authorized(query, process.env.IVR_TOKEN || "", path);
+  const http = event?.requestContext?.http || {};
+  log("בקשה", { method, path: ok ? "(מורשה)" : path.slice(0, 12), token: query.token || query.key ? "יש" : "אין", authorized: ok,
+                ip: http.sourceIp, ua: String(http.userAgent || "").slice(0, 80) });
   try {
     if (!ok) {
       const s = awslambda.HttpResponseStream.from(responseStream, { statusCode: 403, headers: { "Content-Type": "text/plain" } });
