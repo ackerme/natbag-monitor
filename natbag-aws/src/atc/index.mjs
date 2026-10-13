@@ -18,8 +18,8 @@ export function authorized(query, token) {
  * מזרים את השידור אל out (Writable) עד שהמאזין מתנתק או עד maxMs.
  * אם השידור של LiveATC נופל באמצע – מתחבר מחדש.
  */
-export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, log = () => {} }) {
-  const ctrl = new AbortController();
+export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 2000, stallMs = 15_000, log = () => {} }) {
+  const ctrl = new AbortController();      // כל השיחה
   let closed = false;
   const stop = () => { closed = true; ctrl.abort(); };
   out.on?.("close", stop);
@@ -28,20 +28,32 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
   let bytes = 0, connects = 0;
   try {
     while (!closed && !ctrl.signal.aborted) {
+      // ניסיון חיבור אחד: אם LiveATC לא עונה או לא שולח מידע stallMs – מוותרים ומנסים שוב
+      const attempt = new AbortController();
+      const onAbort = () => attempt.abort();
+      ctrl.signal.addEventListener("abort", onAbort, { once: true });
+      let stall = setTimeout(() => attempt.abort(), stallMs);
       try {
         connects++;
-        const r = await fetchImpl(upstream, { redirect: "follow", headers: { "User-Agent": UA }, signal: ctrl.signal });
+        const r = await fetchImpl(upstream, { redirect: "follow", headers: { "User-Agent": UA }, signal: attempt.signal });
+        log("תשובה מ-LiveATC", { status: r.status, url: r.url, type: r.headers?.get?.("content-type") });
         if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+        let first = true;
         for await (const chunk of r.body) {
           if (closed) break;
+          clearTimeout(stall); stall = setTimeout(() => attempt.abort(), stallMs);
+          if (first) { log("מתחיל להזרים"); first = false; }
           bytes += chunk.length;
           out.write(chunk);
         }
         if (!closed && !ctrl.signal.aborted) throw new Error("השידור נסגר");
       } catch (e) {
         if (closed || ctrl.signal.aborted) break;
-        log("השידור נפל – מתחברים שוב", { error: String(e?.message || e) });
+        log("השידור נפל – מתחברים שוב", { error: attempt.signal.aborted ? `אין מידע ${stallMs / 1000} שניות` : String(e?.message || e) });
         await sleep(retryMs);
+      } finally {
+        clearTimeout(stall);
+        ctrl.signal.removeEventListener("abort", onAbort);
       }
     }
   } finally {
