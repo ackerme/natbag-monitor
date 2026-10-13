@@ -130,6 +130,79 @@ Resources:
       Principal: "*"
       InvokedViaFunctionUrl: true
 
+  # ───────────── שלוחה 5: קולות הקשר של נתב"ג (LiveATC, באישורם) – רץ רק כשמתקשרים ─────────────
+  AtcFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: מופעלת סינכרונית מ-Function URL (שיחה טלפונית); אין אירוע לשמור לניסיון חוזר"
+          - id: CKV_AWS_117
+            comment: "VPC: פונה רק לשידור ציבורי באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש)"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת החשבון קטנה ולא מאפשרת שמירה; ההגנה היא טוקן + Budget + Kill Switch"
+          - id: CKV_AWS_173
+            comment: "Env encryption: מוצפן ב-AWS-managed key כברירת מחדל; מפתח KMS משלך עולה דולר בחודש"
+    Properties:
+      FunctionName: natbag-atc
+      CodeUri: src/atc/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 900                    # שיחה אחת עד 15 דקות (המקסימום של Lambda); הקוד מסיים אחרי 14
+      LoggingConfig:
+        LogGroup: !Ref AtcLogGroup
+      Environment:
+        Variables:
+          UPSTREAM_URL: http://d.liveatc.net/llbg2
+          IVR_TOKEN: !Ref IvrToken
+
+  AtcLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 3 ימים"
+    Properties:
+      LogGroupName: /aws/lambda/natbag-atc
+      RetentionInDays: 3
+
+  AtcUrl:
+    Type: AWS::Lambda::Url
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_258
+            comment: "ימות המשיח לא יודעת להזדהות מול AWS; ההגנה היא token=<IVR_TOKEN> בכתובת, Budget ו-Kill Switch"
+    Properties:
+      TargetFunctionArn: !GetAtt AtcFunction.Arn
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM     # מזרים שמע תוך כדי, במקום לחכות לסוף
+
+  AtcUrlPublicInvokeUrl:
+    Type: AWS::Lambda::Permission
+    Condition: IsProd
+    Properties:
+      FunctionName: !Ref AtcFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  AtcUrlPublicInvokeFunction:
+    Type: AWS::Lambda::Permission
+    Condition: IsProd
+    Properties:
+      FunctionName: !Ref AtcFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
   # ───────────── תקציב + מתג כיבוי (רק ב-prod – התקציב הוא על כל החשבון) ─────────────
   BudgetAlertTopic:
     Type: AWS::SNS::Topic
@@ -220,11 +293,14 @@ Resources:
       Environment:
         Variables:
           TARGET_FUNCTION: !Ref ProxyFunction
+          TARGET_FUNCTIONS: !Sub "${ProxyFunction},${AtcFunction}"
       Policies:
         - Statement:
             - Effect: Allow
               Action: lambda:PutFunctionConcurrency
-              Resource: !GetAtt ProxyFunction.Arn
+              Resource:
+                - !GetAtt ProxyFunction.Arn
+                - !GetAtt AtcFunction.Arn
       Events:
         BudgetAlert:
           Type: SNS
@@ -582,6 +658,10 @@ Outputs:
   HealthCheck:
     Description: פתח בדפדפן לבדיקה
     Value: !Sub "${ProxyUrl.FunctionUrl}health"
+  AtcStreamUrl:
+    Condition: IsProd
+    Description: "שלוחה 5: הכתובת לימות המשיח (שידור חי אינטרנטי) – להוסיף בסוף llbg.mp3?token=<IVR_TOKEN>"
+    Value: !GetAtt AtcUrl.FunctionUrl
   DashboardUrl:
     Condition: IsProd
     Description: לוח הניטור ב-CloudWatch

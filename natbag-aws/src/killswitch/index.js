@@ -24,12 +24,13 @@ exports.handler = async (event) => {
     return { disabled: false };
   }
 
+  // כל הפונקציות שעולות כסף: שרת הביניים, ושלוחה 5 (natbag-atc)
+  const targets = (process.env.TARGET_FUNCTIONS || target || "").split(",").map(s => s.trim()).filter(Boolean);
   const { LambdaClient, PutFunctionConcurrencyCommand } = require("@aws-sdk/client-lambda");
   const lambda = new LambdaClient({});
-  await lambda.send(new PutFunctionConcurrencyCommand({
-    FunctionName: target,
-    ReservedConcurrentExecutions: 0,
-  }));
-  console.log(`Budget exceeded → ${target} disabled (reserved concurrency = 0)`);
-  return { disabled: true, target };
+  for (const fn of targets) {
+    await lambda.send(new PutFunctionConcurrencyCommand({ FunctionName: fn, ReservedConcurrentExecutions: 0 }));
+    console.log(`Budget exceeded → ${fn} disabled (reserved concurrency = 0)`);
+  }
+  return { disabled: true, target: targets[0], targets };
 };
