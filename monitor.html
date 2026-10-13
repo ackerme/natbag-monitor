@@ -215,6 +215,11 @@ header h1 a{text-decoration:none;color:inherit}
 #atc.live .lv i:nth-child(4){animation-delay:-150ms;animation-duration:800ms}
 #atc.err{border-color:var(--alarm);color:var(--alarm)} #atc.err .tx{background:var(--alarm)}
 @media (min-width:761px) and (max-width:1599px){#atc .lbl{display:none} #atc{padding:4px 8px}}
+#atcCredit{position:fixed;left:50%;transform:translateX(-50%);bottom:34px;z-index:8000;display:none;align-items:center;gap:6px;background:var(--deep);border:1px solid var(--amber);
+  border-radius:2px;padding:4px 10px;font-size:.75rem;color:var(--dim)}
+#atcCredit a{color:var(--amber)}
+body.atc-on #atcCredit{display:flex}
+@media (max-width:760px){#atcCredit{bottom:58px}}
 @keyframes lvl{0%{height:3px}50%{height:9px}100%{height:14px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
@@ -246,6 +251,7 @@ header h1 a{text-decoration:none;color:inherit}
   <div class="stamp"><span id="dot"></span><span id="lastUp">לא עודכן</span><span id="nextUp"></span><span id="clock" title="שעון אוניברסלי">--:--:--Z</span></div>
 </header>
 
+<div id="atcCredit" role="note">קשר מגדל נתב"ג בשידור חי · שמע באדיבות <a href="https://www.liveatc.net/search/?icao=LLBG" target="_blank" rel="noopener">LiveATC.net</a></div>
 <div id="diag">לחצו "הפעל" כדי להתחיל למשוך נתונים</div>
 <div class="main">
   <div id="lp">
@@ -1240,20 +1246,24 @@ document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.c
   const SRC=['https://d.liveatc.net/llbg2','https://s1-bos.liveatc.net/llbg2','https://s1-fmt2.liveatc.net/llbg2'];
   const btn=document.getElementById('atc'), lbl=btn.querySelector('.lbl');
   let audio=null, idx=0, tmo=null;
-  const set=(st,text)=>{ btn.className=st; lbl.textContent=text; btn.setAttribute('aria-pressed',String(st==='live'||st==='wait')); document.body.classList.toggle('atc-on',st==='live'); };
-  const stop=()=>{ clearTimeout(tmo); if(audio){ audio.pause(); audio.removeAttribute('src'); audio.load(); audio=null; } set('','קשר מגדל'); };
+  // כל נגן שנוצר נשמר כאן – כדי שעצירה תשתיק את כולם, גם ניסיון קודם שהתחיל לנגן באיחור
+  const all=new Set();
+  const kill=a=>{ try{ a.pause(); a.removeAttribute('src'); a.load(); }catch{} all.delete(a); };
+  const set=(st,text)=>{ btn.className=st; lbl.textContent=text; btn.setAttribute('aria-pressed',String(st==='live'||st==='wait')); document.body.classList.toggle('atc-on',st==='live'||st==='wait'); };
+  const stop=()=>{ clearTimeout(tmo); audio=null; [...all].forEach(kill); set('','קשר מגדל'); };
   const tryNext=()=>{
     clearTimeout(tmo);
+    [...all].forEach(kill);                       // הניסיון הקודם לא יחזור לנגן מאחורי הגב
     if(idx>=SRC.length){ stop(); set('err','השידור לא זמין'); setTimeout(()=>{ if(btn.className==='err') set('','קשר מגדל'); },4000); return; }
-    const a=new Audio(); audio=a; a.preload='none';
+    const a=new Audio(); audio=a; all.add(a); a.preload='none';
     a.src=SRC[idx++]+'?nocache='+Date.now();
-    a.addEventListener('playing',()=>{ if(audio===a){ clearTimeout(tmo); set('live','חי · LiveATC'); } });
+    a.addEventListener('playing',()=>{ if(audio===a){ clearTimeout(tmo); set('live','חי · LiveATC'); } else kill(a); });
     a.addEventListener('waiting',()=>{ if(audio===a && btn.className==='live') set('wait','קולט…'); });
     a.addEventListener('error',()=>{ if(audio===a) tryNext(); });
     tmo=setTimeout(()=>{ if(audio===a && btn.className!=='live') tryNext(); },9000);
     a.play().catch(()=>{ if(audio===a) tryNext(); });
   };
-  btn.addEventListener('click',()=>{ if(audio){ stop(); return; } idx=0; set('wait','מתחבר…'); tryNext(); });
+  btn.addEventListener('click',()=>{ if(audio||all.size){ stop(); return; } idx=0; set('wait','מתחבר…'); tryNext(); });
 }
 
 // ===================== INIT =====================
