@@ -114,11 +114,12 @@ footer{border-top:1px solid var(--rule);padding:28px 0 40px;color:var(--dim);fon
 
     <section aria-labelledby="fl-h">
       <h2 id="fl-h">טיסות במעקב</h2>
-      <p class="hint">מספר טיסה עם קוד החברה (LY001) או בלי (580). עד <span id="maxF">10</span> טיסות.</p>
+      <p class="hint">מספר טיסה מלוח הטיסות (LY001 או 580), או אות קריאה כמו שהיא מופיעה ברדאר (WZZ907E). עד <span id="maxF">10</span> טיסות.</p>
       <form class="row" id="addForm">
-        <input type="text" id="newF" placeholder="LY001" maxlength="9" dir="ltr" autocomplete="off" aria-label="מספר טיסה" required>
+        <input type="text" id="newF" placeholder="LY001 / WZZ907E" maxlength="10" dir="ltr" autocomplete="off" aria-label="מספר טיסה או אות קריאה" required>
         <button class="btn pri" type="submit">הוספה</button>
       </form>
+      <div class="msg" id="fMsg" role="status"></div>
       <ul class="flights" id="flights"></ul>
     </section>
 
@@ -161,13 +162,38 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const A = window.NatbagAuth;
 let board = [];
 
-function msg(text, ok = true) { const m = $('msg'); m.textContent = text; m.className = 'msg ' + (ok ? 'ok' : 'err'); clearTimeout(msg.t); msg.t = setTimeout(() => m.className = 'msg', 5000); }
+// הודעה ליד הטופס שנלחץ (ברירת מחדל: למעלה בדף)
+function msg(text, ok = true, id = 'msg') {
+  const m = $(id); m.textContent = text; m.className = 'msg ' + (ok ? 'ok' : 'err');
+  clearTimeout(m._t); m._t = setTimeout(() => m.className = 'msg', ok ? 4000 : 8000);
+}
 const busy = (form, on) => form.querySelectorAll('button').forEach(b => b.disabled = on);
 
-// סטטוס מלוח הטיסות (אותו שרת שהאתר כבר משתמש בו)
+const PROXY = 'https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/';
+// אות קריאה ICAO → קוד IATA בלוח הטיסות (מאותה רשימה שבשרת, natbag-aws/src/proxy/flights.mjs)
+const ICAO_IATA = {"ELY":"LY","ISR":"6H","AIZ":"IZ","THY":"TK","PGT":"PC","UAE":"EK","FDB":"FZ","ETD":"EY","RYR":"FR","WZZ":"W6","EZY":"U2","EJU":"EC","DLH":"LH","BAW":"BA","AFR":"AF","KLM":"KL","SWR":"LX","AUA":"OS","BEL":"SN","ITY":"AZ","AEE":"A3","LOT":"LO","TAP":"TP","IBE":"IB","VLG":"VY","UAL":"UA","DAL":"DL","AAL":"AA","ACA":"AC","ETH":"ET","MSR":"MS","RJA":"RJ","GFA":"GF","AIC":"AI","CPA":"CX","FIN":"AY","SAS":"SK","TVS":"QS","BBG":"BZ","SXS":"XQ","TRA":"HV","UZB":"HY","HFY":"5K","CYP":"CY"};
+const isCallsign = s => /^[A-Z]{3}\d/.test(s);
+
+// המטוסים שברדאר כרגע (פעם אחת לכל טעינה של הרשימה)
+let radarP = null;
+const radar = () => radarP ||= fetch(PROXY + 'aircraft?lat=32.0055&lon=34.8854&dist=135').then(r => r.json()).then(d => d.ac || []).catch(() => []);
+
+// סטטוס: אות קריאה → קודם הרדאר; מספר טיסה → לוח הטיסות (אותו שרת שהאתר כבר משתמש בו)
 async function flightStatus(num) {
+  if (isCallsign(num)) {
+    const ac = (await radar()).find(a => String(a.flight || '').trim().toUpperCase() === num);
+    if (ac) {
+      const alt = typeof ac.alt_baro === 'number' ? Math.round(ac.alt_baro * 0.3048).toLocaleString('he-IL') + ' מ\'' : (ac.alt_baro === 'ground' ? 'על הקרקע' : '');
+      const spd = ac.gs ? Math.round(ac.gs * 1.852) + ' קמ"ש' : '';
+      return ['ברדאר עכשיו', alt, spd].filter(Boolean).join(' · ');
+    }
+    // ELY001 → LY 1 בלוח. עם אות בסוף (WZZ907E) המספר הוא לא מספר הטיסה, אז אין מה לחפש בלוח
+    const m = num.match(/^([A-Z]{3})(\d+)$/);
+    if (!m || !ICAO_IATA[m[1]]) return 'לא נראה כרגע ברדאר';
+    num = ICAO_IATA[m[1]] + Number(m[2]);
+  }
   try {
-    const r = await fetch('https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/flight?num=' + encodeURIComponent(num.replace(/\D/g, '')));
+    const r = await fetch(PROXY + 'flight?num=' + encodeURIComponent(num.replace(/^([A-Z][A-Z0-9]|[0-9][A-Z])(?=\d)/, '').replace(/\D/g, '')));
     const j = await r.json();
     const code = (num.match(/^([A-Z0-9]{2})\d/) || [])[1];
     const list = j.matches || [];
@@ -187,6 +213,7 @@ function render(me) {
   const ul = $('flights');
   ul.innerHTML = me.flights.length ? me.flights.map(f => `<li><span class="num">${esc(f)}</span><span class="st" data-f="${esc(f)}">…</span><button class="x" data-del="${esc(f)}" aria-label="הסרת ${esc(f)}">×</button></li>`).join('')
     : '<li class="empty">אין עדיין טיסות במעקב.</li>';
+  radarP = null;   // נתוני רדאר טריים בכל רענון של הרשימה
   ul.querySelectorAll('.st').forEach(async el => { el.textContent = await flightStatus(el.dataset.f); });
 }
 
@@ -210,8 +237,8 @@ $('btnLogin').onclick = () => A.login().catch(e => msg(e.message, false));
 $('btnLogout').onclick = () => A.logout();
 $('addForm').onsubmit = async e => {
   e.preventDefault(); busy(e.target, true);
-  try { render(await A.api('PUT', '/me/flights/' + encodeURIComponent($('newF').value.trim()))); $('newF').value = ''; msg('הטיסה נוספה למעקב'); }
-  catch (er) { msg(er.message, false); } finally { busy(e.target, false); }
+  try { render(await A.api('PUT', '/me/flights/' + encodeURIComponent($('newF').value.trim()))); $('newF').value = ''; msg('הטיסה נוספה למעקב', true, 'fMsg'); }
+  catch (er) { msg(er.message, false, 'fMsg'); $('newF').focus(); } finally { busy(e.target, false); }
 };
 $('flights').onclick = async e => {
   const f = e.target.dataset?.del; if (!f) return;
