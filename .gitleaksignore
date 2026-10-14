@@ -1,0 +1,2 @@
+# ממצא שגוי: השורה GRAFANA_ADMIN_PASSWORD= ריקה בקובץ הדוגמה
+7d2575b7506d9c9a619fd898ab35f76b0c6591dd:ops/monitoring/env.example:generic-api-key:5
