@@ -35,6 +35,19 @@ Parameters:
     Default: "https://ackerme.github.io/natbag-monitor/monitor.html"
     Description: כתובת האתר שבדיקת הזמינות בודקת כל 5 דקות. ריק = בלי בדיקת אתר
 
+  SiteOrigin:
+    Type: String
+    Default: "https://ackerme.github.io"
+    Description: המקור של האתר (בלי נתיב) – מורשה ב-CORS של API המשתמשים
+  SitePath:
+    Type: String
+    Default: "/natbag-monitor/"
+    Description: הנתיב של האתר – דף החשבון (account.html) הוא כתובת החזרה אחרי התחברות
+  AuthDomainPrefix:
+    Type: String
+    Default: "natbag-monitor"
+    Description: תחילית הכתובת של דף ההתחברות (ייחודית בכל AWS) – https://<prefix>.auth.<region>.amazoncognito.com
+
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
 
@@ -66,7 +79,12 @@ Resources:
       Environment:
         Variables:
           SSM_PREFIX: /natbag/opensky
-          IVR_TOKEN: !Ref IvrToken
+          # לדף החשבון באתר (נתיב /config): כתובת ה-API, דף ההתחברות ומזהה האפליקציה – לא סודות
+          USER_API_URL: !If [IsProd, !Sub "https://${UserApi}.execute-api.${AWS::Region}.amazonaws.com", ""]
+          AUTH_DOMAIN: !If [IsProd, !Sub "https://${AuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com", ""]
+          AUTH_CLIENT_ID: !If [IsProd, !Ref UserPoolClient, ""]
+          IVR_TOKEN_PARAM: /natbag/ivr/token   # סיסמת הקו נקראת מ-SSM (SecureString)
+          IVR_TOKEN: !Ref IvrToken             # גיבוי לתקופת מעבר בלבד – רק אם הפרמטר ב-SSM לא קיים
           IAA_RESOURCE_ID: e83f763b-b7d7-479e-b172-ae981ddc6de5
           METRICS_NAMESPACE: !If [IsProd, Natbag, ""]   # ב-staging לא שולחים מדדים (נשארים ב-Free Tier)
           STAGE: !Ref Stage
@@ -76,6 +94,9 @@ Resources:
             - Effect: Allow
               Action: ssm:GetParameters
               Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/opensky/*
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/ivr/*
             - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
@@ -158,7 +179,13 @@ Resources:
       Environment:
         Variables:
           UPSTREAM_URL: http://d.liveatc.net/llbg2
-          IVR_TOKEN: !Ref IvrToken
+          IVR_TOKEN_PARAM: /natbag/ivr/token
+          IVR_TOKEN: !Ref IvrToken             # גיבוי לתקופת מעבר בלבד
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/ivr/*
 
   AtcLogGroup:
     Type: AWS::Logs::LogGroup
@@ -202,6 +229,177 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: "*"
       InvokedViaFunctionUrl: true
+
+  # ───────────── חשבונות משתמשים: Cognito + API Gateway (JWT) + natbag-user ─────────────
+  # התחברות במייל וסיסמה בדף ההתחברות של Cognito (Hosted UI) עם PKCE. האתר מקבל ID token,
+  # ו-API Gateway מאמת אותו (חתימה, תוקף, issuer, client) לפני שהבקשה מגיעה ל-Lambda.
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: IsProd
+    Properties:
+      UserPoolName: natbag-users
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      DeletionProtection: ACTIVE            # מחיקת המאגר בטעות (למשל בשינוי בתבנית) נחסמת
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 3
+      MfaConfiguration: "OPTIONAL"          # כל משתמש יכול להפעיל אפליקציית אימות (TOTP)
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{ Name: verified_email, Priority: 1 }]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false     # הרשמה עצמית פתוחה
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: [email]
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: "מוניטור נתב\"ג – קוד אימות"
+        EmailMessage: "קוד האימות שלך: {####}"
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: IsProd
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref AuthDomainPrefix
+      ManagedLoginVersion: 1                # דף ההתחברות הקלאסי – בלי עיצוב נוסף לנהל
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: IsProd
+    Properties:
+      ClientName: natbag-site
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false                 # אפליקציה בדפדפן לא יכולה לשמור סוד – לכן PKCE
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Sub "${SiteOrigin}${SitePath}account.html"
+        - http://localhost:8000/account.html
+      LogoutURLs:
+        - !Sub "${SiteOrigin}${SitePath}account.html"
+        - http://localhost:8000/account.html
+      PreventUserExistenceErrors: ENABLED   # לא מגלים אם מייל רשום או לא
+      EnableTokenRevocation: true
+      IdTokenValidity: 60
+      AccessTokenValidity: 60
+      RefreshTokenValidity: 7
+      TokenValidityUnits: { IdToken: minutes, AccessToken: minutes, RefreshToken: days }
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Condition: IsProd
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: admin
+      Description: גישה לדף הניהול (מוסיפים ידנית – ראו README)
+
+  UserApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 14 ימים"
+    Properties:
+      LogGroupName: /aws/apigateway/natbag-users
+      RetentionInDays: 14
+
+  UserApi:
+    Type: AWS::Serverless::HttpApi
+    Condition: IsProd
+    Properties:
+      Name: natbag-users
+      Auth:
+        DefaultAuthorizer: Cognito
+        Authorizers:
+          Cognito:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              audience: [!Ref UserPoolClient]
+      CorsConfiguration:
+        AllowOrigins: [!Ref SiteOrigin, http://localhost:8000]
+        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, PUT, DELETE, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:                 # הגבלת קצב – גם משתמש מחובר לא יכול להציף
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      AccessLogSettings:
+        DestinationArn: !GetAtt UserApiLogGroup.Arn
+        Format: '{"t":"$context.requestTime","id":"$context.requestId","ip":"$context.identity.sourceIp","route":"$context.routeKey","status":"$context.status","ms":"$context.responseLatency","authError":"$context.authorizer.error"}'
+
+  UserFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: מופעלת סינכרונית מ-API Gateway; שגיאות חוזרות למשתמש ונרשמות ב-CloudWatch"
+          - id: CKV_AWS_117
+            comment: "VPC: ניגשת רק ל-DynamoDB; VPC היה מחייב NAT/Endpoints בתשלום בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת החשבון קטנה; ההגנה היא הגבלת הקצב ב-API Gateway + Budget"
+          - id: CKV_AWS_173
+            comment: "Env encryption: אין סודות במשתני הסביבה (רק שם טבלה)"
+    Properties:
+      FunctionName: natbag-user
+      CodeUri: src/user/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref UserLogGroup
+      Environment:
+        Variables:
+          TABLE: natbag-watch
+      Policies:
+        - Statement:
+            # רק רשומות של משתמשים (user#...) – לא סטטיסטיקה ולא שאר הטבלה
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys: ["user#*"]
+            # Scan לדף המנהל (מסונן ל-user# בקוד; Scan לא תומך בהגבלה לפי מפתח)
+            - Effect: Allow
+              Action: dynamodb:Scan
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+      Events:
+        GetMe:        { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: GET,    Path: /me } }
+        DeleteMe:     { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: DELETE, Path: /me } }
+        PutSettings:  { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: /me/settings } }
+        PutAlerts:    { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: /me/alerts } }
+        PutFlight:    { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: "/me/flights/{num}" } }
+        DeleteFlight: { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: DELETE, Path: "/me/flights/{num}" } }
+        AdminUsers:   { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: GET,    Path: /admin/users } }
+
+  UserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 14 ימים"
+    Properties:
+      LogGroupName: /aws/lambda/natbag-user
+      RetentionInDays: 14
 
   # ───────────── תקציב + מתג כיבוי (רק ב-prod – התקציב הוא על כל החשבון) ─────────────
   BudgetAlertTopic:
@@ -419,6 +617,54 @@ Resources:
       Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
       Statistic: Sum
       Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # שלוחה 5: כל הפעלה מחזיקה את ה-Lambda עד 14 דקות – הרבה הפעלות = שימוש חריג (או מישהו שמצא את הכתובת)
+  AlarmAtcInvocationsHigh:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-atc-invocations-high
+      AlarmDescription: יותר מ-30 חיבורים בשעה לשלוחה 5 (קולות הקשר) – לבדוק שאין שימוש לרעה
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  AlarmAtcErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-atc-errors
+      AlarmDescription: שגיאות או חסימות בשלוחה 5 (קולות הקשר)
+      Metrics:
+        - Id: total
+          Expression: "errors + throttles"
+          Label: errors+throttles
+        - Id: errors
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }] }
+            Period: 300
+            Stat: Sum
+        - Id: throttles
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Throttles, Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }] }
+            Period: 300
+            Stat: Sum
       EvaluationPeriods: 1
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
@@ -660,8 +906,16 @@ Outputs:
     Value: !Sub "${ProxyUrl.FunctionUrl}health"
   AtcStreamUrl:
     Condition: IsProd
-    Description: "שלוחה 5: הכתובת לימות המשיח (שידור חי אינטרנטי) – להוסיף בסוף llbg.mp3?token=<IVR_TOKEN>"
+    Description: "שלוחה 5: הכתובת לימות המשיח (שידור חי אינטרנטי) – להוסיף בסוף <ATC_KEY>.mp3 (ראו natbag-aws/README)"
     Value: !GetAtt AtcUrl.FunctionUrl
+  UserApiUrl:
+    Condition: IsProd
+    Description: API של חשבונות המשתמשים
+    Value: !Sub "https://${UserApi}.execute-api.${AWS::Region}.amazonaws.com"
+  UserPoolId:
+    Condition: IsProd
+    Description: מאגר המשתמשים (להוספת מנהל – ראו README)
+    Value: !Ref UserPool
   DashboardUrl:
     Condition: IsProd
     Description: לוח הניטור ב-CloudWatch

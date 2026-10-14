@@ -133,10 +133,42 @@ Resources:
                 Effect: Allow
                 Action: logs:*
                 Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/natbag-*
+              - Sid: ApiLogs
+                Effect: Allow
+                Action: logs:*
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/apigateway/natbag-*
               - Sid: LogsRead
                 Effect: Allow
                 Action: logs:DescribeLogGroups
                 Resource: "*"
+              # Access logs של API Gateway: CloudWatch Logs דורש את ההרשאות האלה על "*" (אין להן ARN של משאב)
+              - Sid: ApiLogDelivery
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                Resource: "*"
+              # חשבונות משתמשים: Cognito ו-API Gateway (HTTP API)
+              - Sid: CognitoCreate
+                Effect: Allow
+                Action: [cognito-idp:CreateUserPool, cognito-idp:DescribeUserPoolDomain, cognito-idp:ListUserPools]
+                Resource: "*"
+              - Sid: CognitoPools
+                Effect: Allow
+                Action: cognito-idp:*
+                Resource: !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+              - Sid: HttpApi
+                Effect: Allow
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE, apigateway:TagResource, apigateway:UntagResource]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*
               - Sid: Topics
                 Effect: Allow
                 Action: sns:*
