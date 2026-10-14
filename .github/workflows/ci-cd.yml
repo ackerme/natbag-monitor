@@ -125,7 +125,7 @@ jobs:
 
   deploy-staging:
     name: פריסה ל-staging
-    needs: [test, secrets-scan]
+    needs: [test, secrets-scan, iac-scan]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev' && vars.AWS_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
     permissions:
@@ -161,7 +161,7 @@ jobs:
         run: |
           missing=""
           [ -z "$ALERT_EMAIL" ] && missing="$missing ALERT_EMAIL"
-          [ -z "$IVR_TOKEN" ] && missing="$missing IVR_TOKEN"
+          [ -z "$IVR_TOKEN" ] && echo "::notice::IVR_TOKEN לא מוגדר ב-GitHub – הסיסמה נקראת מ-SSM (/natbag/ivr/token)"
           if [ -n "$missing" ]; then
             echo "::error::חסרים Secrets ב-GitHub (Settings → Secrets and variables → Actions → Secrets):$missing"
             exit 1
@@ -195,7 +195,7 @@ jobs:
 
   deploy:
     name: פריסה ל-production
-    needs: [test, secrets-scan]
+    needs: [test, secrets-scan, iac-scan]
     # רק ב-push ל-main, ורק אם הוגדר תפקיד ה-OIDC (Settings → Variables)
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
@@ -232,7 +232,7 @@ jobs:
         run: |
           missing=""
           [ -z "$ALERT_EMAIL" ] && missing="$missing ALERT_EMAIL"
-          [ -z "$IVR_TOKEN" ] && missing="$missing IVR_TOKEN"
+          [ -z "$IVR_TOKEN" ] && echo "::notice::IVR_TOKEN לא מוגדר ב-GitHub – הסיסמה נקראת מ-SSM (/natbag/ivr/token)"
           if [ -n "$missing" ]; then
             echo "::error::חסרים Secrets ב-GitHub (Settings → Secrets and variables → Actions → Secrets):$missing"
             exit 1
@@ -262,3 +262,21 @@ jobs:
           curl -fsS "${URL}health"
           curl -fsS "${URL}aircraft?lat=32.0055&lon=34.8854&dist=43" | head -c 300; echo
           curl -sS "${URL}flight?num=1" | head -c 400; echo
+
+      - name: שלוחה 5 – הכתובת לימות המשיח ובדיקת שמע
+        continue-on-error: true          # LiveATC לא זמין לא מכשיל פריסה
+        env:
+          IVR_TOKEN: ${{ secrets.IVR_TOKEN }}
+        run: |
+          ATC=$(aws cloudformation describe-stacks --stack-name natbag \
+                --query "Stacks[0].Outputs[?OutputKey=='AtcStreamUrl'].OutputValue" --output text)
+          BYTES=0
+          [ -n "$IVR_TOKEN" ] && BYTES=$(curl -s --max-time 12 -o /dev/null -w '%{size_download}' "${ATC}llbg.mp3?token=${IVR_TOKEN}" || true)
+          if [ "${BYTES:-0}" -gt 10000 ]; then OK="✅"; else OK="❌ – LiveATC לא הזרים (ראו את הלוג natbag-atc ב-CloudWatch)"; fi
+          {
+            echo "### 📻 שלוחה 5 (קולות הקשר)"
+            echo "הכתובת לימות המשיח (שידור חי אינטרנטי): \`${ATC}<ATC_KEY>.mp3\`"
+            echo ""
+            echo "בדיקת שמע מ-AWS: ${BYTES} בייטים ב-12 שניות ${OK}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ATC: ${ATC}  bytes=${BYTES}"

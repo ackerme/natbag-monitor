@@ -31,7 +31,8 @@ jobs:
           check() {   # שם, כתובת, תנאי jq על התשובה (לא חובה)
             local name="$1" url="$2" cond="${3:-}" body code t
             body=$(mktemp)
-            read -r code t < <(curl -sS -o "$body" -w '%{http_code} %{time_total}' --max-time 20 --retry 2 --retry-delay 5 "$url" || echo "000 0")
+            # \n בסוף: בלעדיו read מחזיר 1 (סוף קובץ בלי שורה חדשה), ו-bash -e עוצר את כל הבדיקה בשקט
+            read -r code t < <(curl -sS -o "$body" -w '%{http_code} %{time_total}\n' --max-time 20 --retry 2 --retry-delay 5 "$url" || echo "000 0") || true
             if [ "$code" != "200" ]; then
               echo "::error title=$name::HTTP $code ($url)"; fail=1
             elif [ -n "$cond" ] && ! jq -e "$cond" "$body" >/dev/null 2>&1; then
