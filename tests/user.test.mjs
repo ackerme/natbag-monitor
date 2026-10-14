@@ -27,6 +27,12 @@ test('קלט: מספרי טיסה, הגדרות, התרעות, קבוצות', ()
   assert.equal(normFlight('580'), '580');
   assert.throws(() => normFlight('<script>'));
   assert.throws(() => normFlight('LY12345'));
+  // אות קריאה מהרדאר (ICAO) נשמרת כמו שהיא
+  assert.equal(normFlight('wzz907e'), 'WZZ907E');
+  assert.equal(normFlight('ELY001'), 'ELY001');
+  assert.equal(normFlight('RJA 344'), 'RJA344');
+  assert.throws(() => normFlight('WZZ907EEE'));
+  assert.throws(() => normFlight('WZZ'));
   assert.deepEqual(validateSettings({ radius: '100', deviation: 20, source: 'opensky' }), { radius: 100, deviation: 20, source: 'opensky' });
   assert.throws(() => validateSettings({ radius: 5000, deviation: 20 }));
   assert.throws(() => validateSettings({ radius: 80, deviation: 20, source: 'evil' }));
