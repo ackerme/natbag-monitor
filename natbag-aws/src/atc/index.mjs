@@ -6,10 +6,11 @@
 //
 //   GET  <url>/<ATC_KEY>.mp3         → audio/mpeg   (הכתובת לימות המשיח – בלי סימנים מיוחדים)
 //   GET  <url>/llbg.mp3?token=<IVR_TOKEN> → אותו דבר
-//   ATC_KEY = 24 התווים הראשונים של sha256("atc:" + IVR_TOKEN) – רק אותיות ומספרים, נגזר מסיסמת הקו
+//   ATC_KEY = 24 התווים הראשונים של sha256("atc:" + IVR_TOKEN) – רק אותיות ומספרים, נגזר מסיסמת הקו (שנשמרת ב-SSM)
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { getIvrToken } from "./secret.mjs";
 
 const UA = "natbag-monitor-atc/1.0 (+https://ackerme.github.io/natbag-monitor/)";
 
@@ -103,7 +104,9 @@ async function main(event, responseStream) {
   const method = event?.requestContext?.http?.method || "GET";
   const path = event?.rawPath || "/";
   const query = event?.queryStringParameters || {};
-  const ok = authorized(query, process.env.IVR_TOKEN || "", path);
+  const token = await getIvrToken();
+  // שלוחה 5 תמיד דורשת סיסמה: בלי סיסמה (או אם לא הצלחנו לקרוא אותה) – דוחים
+  const ok = !!token && authorized(query, token, path);
   const http = event?.requestContext?.http || {};
   log("בקשה", { method, path: ok ? "(מורשה)" : path.slice(0, 12), token: query.token || query.key ? "יש" : "אין", authorized: ok,
                 ip: http.sourceIp, ua: String(http.userAgent || "").slice(0, 80) });
