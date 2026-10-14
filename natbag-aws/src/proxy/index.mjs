@@ -17,6 +17,7 @@
 
 import { gzipSync } from "node:zlib";
 import { summarizeStats, israelDates, fromDynamo, ivrUsage } from "./stats.mjs";
+import { getIvrToken } from "./secret.mjs";
 import { parseBoardRecord, findFlights, callsignCandidates, flightAnswer, handleIvr, israelNowMs, routeIndex } from "./flights.mjs";
 
 const UA = "natbag-monitor/1.0";
@@ -342,7 +343,8 @@ async function recordIvr(params) {
 
 async function ivrResponse(event) {
   const params = parseParams(event);
-  const authorized = !(process.env.IVR_TOKEN && params.token !== process.env.IVR_TOKEN);
+  const token = await getIvrToken();          // null = לא הצלחנו לקרוא את הסיסמה – דוחים
+  const authorized = token !== null && !(token && params.token !== token);
   const [text] = await Promise.all([
     authorized
       ? handleIvr(params, { getBoard, getLive, getNear, onError: (where, e) =>
@@ -402,6 +404,12 @@ export const handler = async (event) => {
       return respond(200, { routes: routeIndex(await getBoard(), israelNowMs()) }, event);
     } catch (e) { return respond(502, { error: "לוח הטיסות לא זמין" }, event); }
   }
+  // הגדרות ההתחברות לדף החשבון באתר – כתובות ומזהה ציבורי בלבד, לא סודות
+  if (path === "/config") {
+    const userApi = process.env.USER_API_URL || "";
+    return respond(200, { accounts: !!userApi, userApi, authDomain: process.env.AUTH_DOMAIN || "", clientId: process.env.AUTH_CLIENT_ID || "" },
+                   event, { "Cache-Control": "max-age=300" });
+  }
   if (path === "/health") return respond(200, { ok: true, stage: process.env.STAGE || "prod", time: new Date().toISOString() }, event);
 
   if (path === "/aircraft" || path === "/opensky") {
@@ -412,5 +420,5 @@ export const handler = async (event) => {
     if (!result.ok) cache.delete(key);   // לא שומרים שגיאות במטמון
     return respond(result.ok ? 200 : 502, result.data, event, { "X-Source": result.data._source || "none" });
   }
-  return respond(404, { error: "לא נמצא", routes: ["/health", "/aircraft", "/opensky", "/mil", "/tracked", "/stats", "/flight", "/routes", "/ivr"] }, event);
+  return respond(404, { error: "לא נמצא", routes: ["/health", "/config", "/aircraft", "/opensky", "/mil", "/tracked", "/stats", "/flight", "/routes", "/ivr"] }, event);
 };
