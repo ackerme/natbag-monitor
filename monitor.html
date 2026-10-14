@@ -231,6 +231,7 @@ body.atc-on #atcCredit{display:flex}
     <a id="homeLink" href="index.html">דף הבית</a>
     <a id="statsLink" href="stats.html">סטטיסטיקה</a>
     <a href="stats.html#status">מצב המערכת</a>
+    <a id="acctLink" href="account.html">החשבון שלי</a>
   </nav>
   <div class="cr">
     <span class="cfg">
@@ -314,6 +315,7 @@ body.atc-on #atcCredit{display:flex}
 </div>
 
 <script src="detect.js"></script>
+<script src="auth.js"></script>
 <script>
 // ===================== CONFIG =====================
 const TLV_LAT = 32.0055, TLV_LON = 34.8854;
@@ -1265,6 +1267,18 @@ document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.c
   };
   btn.addEventListener('click',()=>{ if(audio||all.size){ stop(); return; } idx=0; set('wait','מתחבר…'); tryNext(); });
 }
+
+// ===================== חשבון: טעינת ההגדרות השמורות =====================
+(async()=>{
+  const A=window.NatbagAuth; if(!A||!A.signedIn()) return;
+  try{
+    const me=await A.api('GET','/me');
+    document.getElementById('ri').value=me.settings.radius;
+    document.getElementById('dt').value=me.settings.deviation;
+    document.getElementById('srcSel').value=me.settings.source;
+    const a=document.getElementById('acctLink'); a.textContent=me.email.split('@')[0]; a.title='מחובר כ-'+me.email+' · ההגדרות נטענו מהחשבון';
+  }catch{}
+})();
 
 // ===================== INIT =====================
 { const ck=document.getElementById('clock'); const t=()=>{ ck.textContent=new Date().toISOString().slice(11,19)+'Z'; }; t(); setInterval(t,1000); }

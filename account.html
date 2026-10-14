@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>החשבון שלי – מוניטור נתב"ג</title>
+<meta name="description" content="טיסות במעקב, הגדרות אישיות והתרעות – מוניטור נתב&quot;ג">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<meta name="theme-color" content="#29363d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --scope:#29363d; --deep:#25313a; --panel:#313f47; --rule:#46565f;
+  --ink:#e4e9eb; --dim:#9daab1; --faint:#71828b;
+  --amber:#e8b23a; --pale:#9fcbdc; --alarm:#e0533d; --good:#7fc29b;
+  --sans:'IBM Plex Sans Hebrew',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--scope);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
+a{color:inherit}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+.wrap{max-width:880px;margin:0 auto;padding:0 24px}
+@media (max-width:600px){.wrap{padding:0 16px}}
+.bar{position:sticky;top:0;z-index:20;background:var(--scope);border-bottom:1px solid var(--rule)}
+.bar .wrap{display:flex;align-items:center;gap:28px;height:56px;max-width:1120px}
+.brand{font-weight:700;text-decoration:none;font-size:1.05rem;white-space:nowrap}
+.bar nav{display:flex;gap:22px;margin-inline-start:auto;font-size:.95rem}
+.bar nav a{text-decoration:none;color:var(--dim);padding:4px 0;border-bottom:2px solid transparent;white-space:nowrap}
+.bar nav a:hover,.bar nav a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+@media (max-width:820px){.bar .wrap{height:auto;flex-wrap:wrap;gap:6px 18px;padding-block:10px}.bar nav{order:3;width:100%;margin:0;overflow-x:auto;gap:18px}}
+
+main.wrap{padding-top:40px;padding-bottom:64px}
+h1{font-size:clamp(1.7rem,3.4vw,2.3rem);line-height:1.15}
+.sub{color:var(--dim);margin-top:6px}
+section{margin-top:44px;border-top:1px solid var(--rule);padding-top:22px}
+h2{font-size:1.15rem;margin-bottom:6px}
+.hint{color:var(--dim);font-size:.9rem;margin-bottom:14px;max-width:62ch}
+.btn{padding:7px 18px;border:1px solid var(--ink);border-radius:2px;background:none;cursor:pointer;font-weight:500;font-size:.92rem}
+.btn.pri{background:var(--ink);color:var(--scope)}
+.btn.warn{border-color:var(--alarm);color:var(--alarm)}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input[type=text],input[type=number],select{background:var(--deep);border:1px solid var(--rule);border-radius:2px;padding:6px 10px}
+input[type=number]{width:90px;font-family:var(--mono)}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--dim)}
+.msg{margin-top:16px;padding:10px 14px;border:1px solid var(--rule);border-inline-start-width:4px;display:none}
+.msg.ok{border-inline-start-color:var(--good);display:block} .msg.err{border-inline-start-color:var(--alarm);display:block}
+
+.who{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}
+.who b{font-family:var(--mono);direction:ltr}
+.tag{font-size:.75rem;border:1px solid var(--amber);color:var(--amber);padding:0 8px;border-radius:2px}
+
+.perks{list-style:none;margin:22px 0 26px;display:grid;gap:12px}
+.perks li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start}
+.perks svg{width:22px;height:22px;color:var(--amber);margin-top:2px}
+.perks b{display:block}
+.perks span{color:var(--dim);font-size:.92rem}
+
+.flights{list-style:none;margin-top:14px}
+.flights li{display:flex;align-items:center;gap:14px;padding:9px 0;border-top:1px solid var(--rule)}
+.flights li:last-child{border-bottom:1px solid var(--rule)}
+.flights .num{font-family:var(--mono);font-weight:500;font-size:1.05rem;direction:ltr;min-width:90px;text-align:right}
+.flights .st{color:var(--dim);font-size:.9rem;flex:1}
+.flights .x{background:none;border:0;color:var(--faint);cursor:pointer;font-size:1.2rem;line-height:1;padding:2px 6px}
+.flights .x:hover{color:var(--alarm)}
+.empty{color:var(--dim);padding:10px 0}
+.danger{border-top-color:#e0533d66}
+[hidden]{display:none!important}
+footer{border-top:1px solid var(--rule);padding:28px 0 40px;color:var(--dim);font-size:.9rem}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="index.html">מוניטור נתב"ג</a>
+    <nav aria-label="ניווט ראשי">
+      <a href="monitor.html">רדאר</a>
+      <a href="stats.html">סטטיסטיקה</a>
+      <a href="account.html" aria-current="page">החשבון שלי</a>
+      <a id="adminNav" href="admin.html" hidden>ניהול</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>החשבון שלי</h1>
+  <p class="sub" id="sub">טוען…</p>
+  <div class="msg" id="msg" role="status"></div>
+
+  <!-- לא מחובר -->
+  <div id="guest" hidden>
+    <ul class="perks">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 16l20-6-20-6 4 6-4 6z"/><path d="M6 10h8"/></svg>
+        <div><b>מעקב אחרי טיסות</b><span>שומרים עד 10 טיסות ורואים את הסטטוס שלהן במקום אחד.</span></div></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>
+        <div><b>הגדרות אישיות</b><span>הרדיוס, סף הסטייה ומקור הנתונים נשמרים בחשבון ונטענים ברדאר בכל מכשיר.</span></div></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 004 0"/></svg>
+        <div><b>התרעות אישיות</b><span>בוחרים מאיזו רמת חריגה בתנועה האווירית לקבל התרעה במייל.</span></div></li>
+    </ul>
+    <div class="row"><button class="btn pri" id="btnLogin">התחברות / הרשמה</button></div>
+    <p class="hint" style="margin-top:14px">ההתחברות מתבצעת בדף מאובטח של Amazon Cognito. הסיסמה לא עוברת דרך האתר הזה. אפשר להפעיל אימות דו-שלבי.</p>
+  </div>
+
+  <!-- מחובר -->
+  <div id="member" hidden>
+    <div class="who"><span>מחובר כ-<b id="email"></b></span><span class="tag" id="adminTag" hidden>מנהל</span>
+      <button class="btn" id="btnLogout">התנתקות</button></div>
+
+    <section aria-labelledby="fl-h">
+      <h2 id="fl-h">טיסות במעקב</h2>
+      <p class="hint">מספר טיסה עם קוד החברה (LY001) או בלי (580). עד <span id="maxF">10</span> טיסות.</p>
+      <form class="row" id="addForm">
+        <input type="text" id="newF" placeholder="LY001" maxlength="9" dir="ltr" autocomplete="off" aria-label="מספר טיסה" required>
+        <button class="btn pri" type="submit">הוספה</button>
+      </form>
+      <ul class="flights" id="flights"></ul>
+    </section>
+
+    <section aria-labelledby="st-h">
+      <h2 id="st-h">הגדרות הרדאר</h2>
+      <p class="hint">נטענות אוטומטית בדף הרדאר כשאתם מחוברים.</p>
+      <form class="row" id="setForm">
+        <label class="f">רדיוס, ק"מ<input type="number" id="sRadius" min="20" max="300" required></label>
+        <label class="f">סטייה מותרת, מעלות<input type="number" id="sDev" min="5" max="60" required></label>
+        <label class="f">מקור נתונים<select id="sSrc"><option value="auto">אוטומטי</option><option value="opensky">OpenSky בלבד</option></select></label>
+        <button class="btn pri" type="submit" style="align-self:flex-end">שמירה</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="al-h">
+      <h2 id="al-h">התרעות</h2>
+      <p class="hint">ההעדפות נשמרות כבר עכשיו; שליחת המיילים (חריגה בתנועה האווירית ושינוי בסטטוס של טיסה במעקב) תופעל בשלב הבא. מדד לתנועה האווירית בלבד – לא התרעת פיקוד העורף.</p>
+      <form class="row" id="alForm">
+        <label class="f">חריגה בתנועה האווירית
+          <select id="aLevel"><option value="off">בלי התרעה</option><option value="unusual">מחריגה ומעלה</option><option value="major">רק חריגה משמעותית</option></select></label>
+        <label class="f" style="flex-direction:row;align-items:center;gap:8px;align-self:flex-end"><input type="checkbox" id="aFlights"> שינוי בטיסה במעקב</label>
+        <button class="btn pri" type="submit" style="align-self:flex-end">שמירה</button>
+      </form>
+    </section>
+
+    <section class="danger" aria-labelledby="dz-h">
+      <h2 id="dz-h">מחיקת המידע שלי</h2>
+      <p class="hint">מוחק את הטיסות, ההגדרות וההתרעות מהשרת. כדי למחוק גם את המשתמש עצמו, אפשר לבקש במייל.</p>
+      <button class="btn warn" id="btnDelete">מחיקה</button>
+    </section>
+  </div>
+</main>
+
+<footer><div class="wrap">פרויקט אישי ללמידה. לא מערכת בטיחות ולא לשימוש מבצעי.</div></footer>
+
+<script src="auth.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const A = window.NatbagAuth;
+let board = [];
+
+function msg(text, ok = true) { const m = $('msg'); m.textContent = text; m.className = 'msg ' + (ok ? 'ok' : 'err'); clearTimeout(msg.t); msg.t = setTimeout(() => m.className = 'msg', 5000); }
+const busy = (form, on) => form.querySelectorAll('button').forEach(b => b.disabled = on);
+
+// סטטוס מלוח הטיסות (אותו שרת שהאתר כבר משתמש בו)
+async function flightStatus(num) {
+  try {
+    const r = await fetch('https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws/flight?num=' + encodeURIComponent(num.replace(/\D/g, '')));
+    const j = await r.json();
+    const code = (num.match(/^([A-Z0-9]{2})\d/) || [])[1];
+    const list = j.matches || [];
+    const f = (code && list.find(m => m.iata === code)) || list[0];
+    if (!f) return 'לא נמצאה היום בלוח הטיסות';
+    const t = String(f.est || f.sched || '').slice(11, 16);
+    return [(f.iata || '') + ' ' + (f.num || ''), f.dir === 'D' ? 'המראה ל' + f.cityHe : 'נחיתה מ' + f.cityHe, f.statusHe, t].filter(x => x && x.trim()).join(' · ');
+  } catch { return ''; }
+}
+
+function render(me) {
+  $('email').textContent = me.email;
+  $('adminTag').hidden = $('adminNav').hidden = !me.admin;
+  $('maxF').textContent = me.maxFlights;
+  $('sRadius').value = me.settings.radius; $('sDev').value = me.settings.deviation; $('sSrc').value = me.settings.source;
+  $('aLevel').value = me.alerts.anomaly; $('aFlights').checked = me.alerts.flights;
+  const ul = $('flights');
+  ul.innerHTML = me.flights.length ? me.flights.map(f => `<li><span class="num">${esc(f)}</span><span class="st" data-f="${esc(f)}">…</span><button class="x" data-del="${esc(f)}" aria-label="הסרת ${esc(f)}">×</button></li>`).join('')
+    : '<li class="empty">אין עדיין טיסות במעקב.</li>';
+  ul.querySelectorAll('.st').forEach(async el => { el.textContent = await flightStatus(el.dataset.f); });
+}
+
+async function load() {
+  const cfg = await A.config();
+  if (!cfg.accounts) { $('sub').textContent = 'חשבונות משתמשים עוד לא הופעלו בשרת.'; return; }
+  try { await A.handleRedirect(); } catch (e) { msg(e.message, false); }
+  if (!A.signedIn()) { $('sub').textContent = 'התחברו כדי לשמור טיסות, הגדרות והתרעות.'; $('guest').hidden = false; return; }
+  try {
+    const me = await A.api('GET', '/me');
+    $('sub').textContent = 'הנתונים נשמרים בחשבון ומסונכרנים בין מכשירים.';
+    $('member').hidden = false; $('guest').hidden = true;
+    render(me);
+  } catch (e) {
+    if (e.status === 401) { $('guest').hidden = false; $('sub').textContent = 'פג תוקף ההתחברות – התחברו שוב.'; }
+    else msg(e.message, false);
+  }
+}
+
+$('btnLogin').onclick = () => A.login().catch(e => msg(e.message, false));
+$('btnLogout').onclick = () => A.logout();
+$('addForm').onsubmit = async e => {
+  e.preventDefault(); busy(e.target, true);
+  try { render(await A.api('PUT', '/me/flights/' + encodeURIComponent($('newF').value.trim()))); $('newF').value = ''; msg('הטיסה נוספה למעקב'); }
+  catch (er) { msg(er.message, false); } finally { busy(e.target, false); }
+};
+$('flights').onclick = async e => {
+  const f = e.target.dataset?.del; if (!f) return;
+  try { render(await A.api('DELETE', '/me/flights/' + encodeURIComponent(f))); } catch (er) { msg(er.message, false); }
+};
+$('setForm').onsubmit = async e => {
+  e.preventDefault(); busy(e.target, true);
+  try { render(await A.api('PUT', '/me/settings', { radius: +$('sRadius').value, deviation: +$('sDev').value, source: $('sSrc').value })); msg('ההגדרות נשמרו'); }
+  catch (er) { msg(er.message, false); } finally { busy(e.target, false); }
+};
+$('alForm').onsubmit = async e => {
+  e.preventDefault(); busy(e.target, true);
+  try { render(await A.api('PUT', '/me/alerts', { anomaly: $('aLevel').value, flights: $('aFlights').checked })); msg('ההתרעות נשמרו'); }
+  catch (er) { msg(er.message, false); } finally { busy(e.target, false); }
+};
+$('btnDelete').onclick = async () => {
+  if (!confirm('למחוק את כל המידע שלך מהשרת? אי אפשר לבטל.')) return;
+  try { await A.api('DELETE', '/me'); msg('המידע נמחק'); setTimeout(() => A.logout(), 800); } catch (er) { msg(er.message, false); }
+};
+load();
+</script>
+</body>
+</html>
