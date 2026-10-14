@@ -1,0 +1,922 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  natbag-proxy – שרת ביניים ל-ADS-B עבור מוניטור נתב"ג,
+  עם תקציב, התרעה במייל ומתג כיבוי אוטומטי.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, staging]
+    Description: >
+      prod = הסביבה האמיתית (עם תקציב, מתג כיבוי, ניטור והתרעות).
+      staging = סביבת בדיקה: רק שרת הביניים, בשמות נפרדים (natbag-staging-*), בלי התרעות ובלי מדדים.
+  AlertEmail:
+    Type: String
+    Description: כתובת המייל לקבלת התרעות תקציב
+    AllowedPattern: ".+@.+\\..+"
+  BudgetLimitUSD:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: תקציב חודשי בדולרים. מעבר לסכום הזה שרת הביניים נכבה אוטומטית.
+  IvrToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: סיסמה לקו הטלפוני (ימות המשיח). אם מוגדרת – רק בקשות עם token=<הסיסמה> ייענו.
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: מאיפה מותר לקרוא לשרת. "*" = מכל מקום (כולל קובץ מהמחשב). אפשר לשים https://USERNAME.github.io
+  SiteUrl:
+    Type: String
+    Default: "https://ackerme.github.io/natbag-monitor/monitor.html"
+    Description: כתובת האתר שבדיקת הזמינות בודקת כל 5 דקות. ריק = בלי בדיקת אתר
+
+  SiteOrigin:
+    Type: String
+    Default: "https://ackerme.github.io"
+    Description: המקור של האתר (בלי נתיב) – מורשה ב-CORS של API המשתמשים
+  SitePath:
+    Type: String
+    Default: "/natbag-monitor/"
+    Description: הנתיב של האתר – דף החשבון (account.html) הוא כתובת החזרה אחרי התחברות
+  AuthDomainPrefix:
+    Type: String
+    Default: "natbag-monitor"
+    Description: תחילית הכתובת של דף ההתחברות (ייחודית בכל AWS) – https://<prefix>.auth.<region>.amazoncognito.com
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+
+Resources:
+  # ───────────── שרת הביניים ─────────────
+  ProxyFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
+    Properties:
+      FunctionName: !If [IsProd, natbag-proxy, natbag-staging-proxy]
+      CodeUri: src/proxy/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]          # זול ב-20% מ-x86
+      MemorySize: 128
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref ProxyLogGroup
+      Environment:
+        Variables:
+          SSM_PREFIX: /natbag/opensky
+          # לדף החשבון באתר (נתיב /config): כתובת ה-API, דף ההתחברות ומזהה האפליקציה – לא סודות
+          USER_API_URL: !If [IsProd, !Sub "https://${UserApi}.execute-api.${AWS::Region}.amazonaws.com", ""]
+          AUTH_DOMAIN: !If [IsProd, !Sub "https://${AuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com", ""]
+          AUTH_CLIENT_ID: !If [IsProd, !Ref UserPoolClient, ""]
+          IVR_TOKEN_PARAM: /natbag/ivr/token   # סיסמת הקו נקראת מ-SSM (SecureString)
+          IVR_TOKEN: !Ref IvrToken             # גיבוי לתקופת מעבר בלבד – רק אם הפרמטר ב-SSM לא קיים
+          IAA_RESOURCE_ID: e83f763b-b7d7-479e-b172-ae981ddc6de5
+          METRICS_NAMESPACE: !If [IsProd, Natbag, ""]   # ב-staging לא שולחים מדדים (נשארים ב-Free Tier)
+          STAGE: !Ref Stage
+          STATS_TABLE: !If [IsProd, natbag-watch, ""]   # לנתיב /stats, וספירת שיחות הקו (רק רשומות ivr#)
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/opensky/*
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/ivr/*
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+            # כתיבה רק לרשומות סטטיסטיקת הטלפון (ivr#...), לא לשאר הטבלה
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys: ["ivr#*"]
+
+  ProxyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
+    Properties:
+      LogGroupName: !If [IsProd, /aws/lambda/natbag-proxy, /aws/lambda/natbag-staging-proxy]
+      RetentionInDays: 3              # לוגים נמחקים אחרי 3 ימים – לא מצטברת עלות אחסון
+
+  ProxyUrl:
+    Type: AWS::Lambda::Url
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_258
+            comment: "ציבורי בכוונה: האתר והקו הטלפוני ניגשים בלי התחברות. הגנות: CORS, טוקן לנתיב /ivr, נתוני קריאה בלבד, Budget + Kill Switch"
+    Properties:
+      TargetFunctionArn: !GetAtt ProxyFunction.Arn
+      AuthType: NONE
+      Cors:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET]
+        MaxAge: 86400
+
+  # מאוקטובר 2025 כתובת ציבורית צריכה את שתי ההרשאות האלה
+  ProxyUrlPublicInvokeUrl:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProxyFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ProxyUrlPublicInvokeFunction:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProxyFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ───────────── שלוחה 5: קולות הקשר של נתב"ג (LiveATC, באישורם) – רץ רק כשמתקשרים ─────────────
+  AtcFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: מופעלת סינכרונית מ-Function URL (שיחה טלפונית); אין אירוע לשמור לניסיון חוזר"
+          - id: CKV_AWS_117
+            comment: "VPC: פונה רק לשידור ציבורי באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש)"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת החשבון קטנה ולא מאפשרת שמירה; ההגנה היא טוקן + Budget + Kill Switch"
+          - id: CKV_AWS_173
+            comment: "Env encryption: מוצפן ב-AWS-managed key כברירת מחדל; מפתח KMS משלך עולה דולר בחודש"
+    Properties:
+      FunctionName: natbag-atc
+      CodeUri: src/atc/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 900                    # שיחה אחת עד 15 דקות (המקסימום של Lambda); הקוד מסיים אחרי 14
+      LoggingConfig:
+        LogGroup: !Ref AtcLogGroup
+      Environment:
+        Variables:
+          UPSTREAM_URL: http://d.liveatc.net/llbg2
+          IVR_TOKEN_PARAM: /natbag/ivr/token
+          IVR_TOKEN: !Ref IvrToken             # גיבוי לתקופת מעבר בלבד
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/ivr/*
+
+  AtcLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 3 ימים"
+    Properties:
+      LogGroupName: /aws/lambda/natbag-atc
+      RetentionInDays: 3
+
+  AtcUrl:
+    Type: AWS::Lambda::Url
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_258
+            comment: "ימות המשיח לא יודעת להזדהות מול AWS; ההגנה היא token=<IVR_TOKEN> בכתובת, Budget ו-Kill Switch"
+    Properties:
+      TargetFunctionArn: !GetAtt AtcFunction.Arn
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM     # מזרים שמע תוך כדי, במקום לחכות לסוף
+
+  AtcUrlPublicInvokeUrl:
+    Type: AWS::Lambda::Permission
+    Condition: IsProd
+    Properties:
+      FunctionName: !Ref AtcFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  AtcUrlPublicInvokeFunction:
+    Type: AWS::Lambda::Permission
+    Condition: IsProd
+    Properties:
+      FunctionName: !Ref AtcFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ───────────── חשבונות משתמשים: Cognito + API Gateway (JWT) + natbag-user ─────────────
+  # התחברות במייל וסיסמה בדף ההתחברות של Cognito (Hosted UI) עם PKCE. האתר מקבל ID token,
+  # ו-API Gateway מאמת אותו (חתימה, תוקף, issuer, client) לפני שהבקשה מגיעה ל-Lambda.
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: IsProd
+    Properties:
+      UserPoolName: natbag-users
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      DeletionProtection: ACTIVE            # מחיקת המאגר בטעות (למשל בשינוי בתבנית) נחסמת
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 3
+      MfaConfiguration: "OPTIONAL"          # כל משתמש יכול להפעיל אפליקציית אימות (TOTP)
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{ Name: verified_email, Priority: 1 }]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false     # הרשמה עצמית פתוחה
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: [email]
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: "מוניטור נתב\"ג – קוד אימות"
+        EmailMessage: "קוד האימות שלך: {####}"
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: IsProd
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref AuthDomainPrefix
+      ManagedLoginVersion: 1                # דף ההתחברות הקלאסי – בלי עיצוב נוסף לנהל
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: IsProd
+    Properties:
+      ClientName: natbag-site
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false                 # אפליקציה בדפדפן לא יכולה לשמור סוד – לכן PKCE
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Sub "${SiteOrigin}${SitePath}account.html"
+        - http://localhost:8000/account.html
+      LogoutURLs:
+        - !Sub "${SiteOrigin}${SitePath}account.html"
+        - http://localhost:8000/account.html
+      PreventUserExistenceErrors: ENABLED   # לא מגלים אם מייל רשום או לא
+      EnableTokenRevocation: true
+      IdTokenValidity: 60
+      AccessTokenValidity: 60
+      RefreshTokenValidity: 7
+      TokenValidityUnits: { IdToken: minutes, AccessToken: minutes, RefreshToken: days }
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Condition: IsProd
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: admin
+      Description: גישה לדף הניהול (מוסיפים ידנית – ראו README)
+
+  UserApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 14 ימים"
+    Properties:
+      LogGroupName: /aws/apigateway/natbag-users
+      RetentionInDays: 14
+
+  UserApi:
+    Type: AWS::Serverless::HttpApi
+    Condition: IsProd
+    Properties:
+      Name: natbag-users
+      Auth:
+        DefaultAuthorizer: Cognito
+        Authorizers:
+          Cognito:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              audience: [!Ref UserPoolClient]
+      CorsConfiguration:
+        AllowOrigins: [!Ref SiteOrigin, http://localhost:8000]
+        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, PUT, DELETE, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:                 # הגבלת קצב – גם משתמש מחובר לא יכול להציף
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      AccessLogSettings:
+        DestinationArn: !GetAtt UserApiLogGroup.Arn
+        Format: '{"t":"$context.requestTime","id":"$context.requestId","ip":"$context.identity.sourceIp","route":"$context.routeKey","status":"$context.status","ms":"$context.responseLatency","authError":"$context.authorizer.error"}'
+
+  UserFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: מופעלת סינכרונית מ-API Gateway; שגיאות חוזרות למשתמש ונרשמות ב-CloudWatch"
+          - id: CKV_AWS_117
+            comment: "VPC: ניגשת רק ל-DynamoDB; VPC היה מחייב NAT/Endpoints בתשלום בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת החשבון קטנה; ההגנה היא הגבלת הקצב ב-API Gateway + Budget"
+          - id: CKV_AWS_173
+            comment: "Env encryption: אין סודות במשתני הסביבה (רק שם טבלה)"
+    Properties:
+      FunctionName: natbag-user
+      CodeUri: src/user/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref UserLogGroup
+      Environment:
+        Variables:
+          TABLE: natbag-watch
+      Policies:
+        - Statement:
+            # רק רשומות של משתמשים (user#...) – לא סטטיסטיקה ולא שאר הטבלה
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys: ["user#*"]
+            # Scan לדף המנהל (מסונן ל-user# בקוד; Scan לא תומך בהגבלה לפי מפתח)
+            - Effect: Allow
+              Action: dynamodb:Scan
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/natbag-watch
+      Events:
+        GetMe:        { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: GET,    Path: /me } }
+        DeleteMe:     { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: DELETE, Path: /me } }
+        PutSettings:  { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: /me/settings } }
+        PutAlerts:    { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: /me/alerts } }
+        PutFlight:    { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: PUT,    Path: "/me/flights/{num}" } }
+        DeleteFlight: { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: DELETE, Path: "/me/flights/{num}" } }
+        AdminUsers:   { Type: HttpApi, Properties: { ApiId: !Ref UserApi, Method: GET,    Path: /admin/users } }
+
+  UserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsProd
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש; הלוגים מוצפנים ב-AWS ונשמרים 14 ימים"
+    Properties:
+      LogGroupName: /aws/lambda/natbag-user
+      RetentionInDays: 14
+
+  # ───────────── תקציב + מתג כיבוי (רק ב-prod – התקציב הוא על כל החשבון) ─────────────
+  BudgetAlertTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_26
+            comment: "Budgets ו-CloudWatch Alarms יכולים לפרסם לנושא מוצפן רק עם מפתח KMS משלך (דולר בחודש); ההודעות לא מכילות מידע רגיש"
+    Condition: IsProd
+    Properties:
+      TopicName: natbag-budget-alerts
+
+  BudgetAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: IsProd
+    Properties:
+      Topics: [!Ref BudgetAlertTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBudgetsPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref BudgetAlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: IsProd
+    DependsOn: BudgetAlertTopicPolicy
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimitUSD
+          Unit: USD
+      NotificationsWithSubscribers:
+        # 50% – רק מייל אזהרה
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        # 100% – מייל + כיבוי אוטומטי דרך SNS
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+            - SubscriptionType: SNS
+              Address: !Ref BudgetAlertTopic
+
+  KillSwitchFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
+    Condition: IsProd
+    Properties:
+      FunctionName: natbag-killswitch
+      CodeUri: src/killswitch/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 15
+      LoggingConfig:
+        LogGroup: !Ref KillSwitchLogGroup
+      Environment:
+        Variables:
+          TARGET_FUNCTION: !Ref ProxyFunction
+          TARGET_FUNCTIONS: !Sub "${ProxyFunction},${AtcFunction}"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:PutFunctionConcurrency
+              Resource:
+                - !GetAtt ProxyFunction.Arn
+                - !GetAtt AtcFunction.Arn
+      Events:
+        BudgetAlert:
+          Type: SNS
+          Properties:
+            Topic: !Ref BudgetAlertTopic
+
+  KillSwitchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
+    Condition: IsProd
+    Properties:
+      LogGroupName: /aws/lambda/natbag-killswitch
+      RetentionInDays: 30
+
+  # ───────────── ניטור (Observability) – רק ב-prod ─────────────
+  # התרעות על המערכת עצמה נשלחות למייל דרך SNS. צריך לאשר את המייל הראשון ש-AWS שולחת ("Confirm subscription").
+  OpsAlertTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_26
+            comment: "Budgets ו-CloudWatch Alarms יכולים לפרסם לנושא מוצפן רק עם מפתח KMS משלך (דולר בחודש); ההודעות לא מכילות מידע רגיש"
+    Condition: IsProd
+    Properties:
+      TopicName: natbag-ops-alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  # בדיקת זמינות מבחוץ כל 5 דקות: /health, /aircraft והאתר
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
+    Condition: IsProd
+    Properties:
+      FunctionName: natbag-healthcheck
+      CodeUri: src/healthcheck/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 20
+      LoggingConfig:
+        LogGroup: !Ref HealthCheckLogGroup
+      Environment:
+        Variables:
+          PROXY_URL: !GetAtt ProxyUrl.FunctionUrl
+          SITE_URL: !Ref SiteUrl
+          TABLE: !Ref WatchTable          # מונים יומיים לדף "מצב המערכת"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt WatchTable.Arn
+      Events:
+        Every5Min:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+  HealthCheckLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
+    Condition: IsProd
+    Properties:
+      LogGroupName: /aws/lambda/natbag-healthcheck
+      RetentionInDays: 3
+
+  # שגיאות בקוד של השרת
+  AlarmProxyErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-errors
+      AlarmDescription: שרת הביניים זרק שגיאות
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # בקשות שנחסמו – למשל אחרי שמתג הכיבוי הופעל
+  AlarmProxyThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-throttles
+      AlarmDescription: בקשות לשרת נחסמות (ייתכן שמתג הכיבוי הופעל)
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # שלוחה 5: כל הפעלה מחזיקה את ה-Lambda עד 14 דקות – הרבה הפעלות = שימוש חריג (או מישהו שמצא את הכתובת)
+  AlarmAtcInvocationsHigh:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-atc-invocations-high
+      AlarmDescription: יותר מ-30 חיבורים בשעה לשלוחה 5 (קולות הקשר) – לבדוק שאין שימוש לרעה
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  AlarmAtcErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-atc-errors
+      AlarmDescription: שגיאות או חסימות בשלוחה 5 (קולות הקשר)
+      Metrics:
+        - Id: total
+          Expression: "errors + throttles"
+          Label: errors+throttles
+        - Id: errors
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }] }
+            Period: 300
+            Stat: Sum
+        - Id: throttles
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Throttles, Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }] }
+            Period: 300
+            Stat: Sum
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # השרת איטי: p90 מעל 4 שניות, 15 דקות ברצף
+  AlarmProxySlow:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-proxy-slow
+      AlarmDescription: 10% מהבקשות לוקחות יותר מ-4 שניות, כבר 15 דקות
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProxyFunction }]
+      ExtendedStatistic: p90
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 4000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # כל שלושת מקורות ה-ADS-B נפלו (לפחות 3 פעמים ב-15 דקות)
+  AlarmAdsbDown:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-adsb-sources-down
+      AlarmDescription: כל מקורות ה-ADS-B (adsb.lol, airplanes.live, adsb.fi) לא עונים
+      Namespace: Natbag
+      MetricName: UpstreamFailure
+      Dimensions: [{ Name: Route, Value: aircraft }]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # לוח הטיסות של רשות שדות התעופה לא זמין → הקו הטלפוני לא יכול לענות
+  AlarmBoardDown:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-board-down
+      AlarmDescription: לוח הטיסות של רשות שדות התעופה (data.gov.il) לא זמין – הקו הטלפוני מושפע
+      Namespace: Natbag
+      MetricName: UpstreamFailure
+      Dimensions: [{ Name: Route, Value: board }]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # בדיקת הזמינות נכשלה פעמיים ברצף (10 דקות)
+  AlarmHealthCheck:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-healthcheck-failed
+      AlarmDescription: בדיקת הזמינות החיצונית נכשלה פעמיים ברצף (השרת או האתר לא עונים)
+      Namespace: Natbag
+      MetricName: HealthCheckFailed
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  # ───────────── התרעה טלפונית על חריגה בתנועה האווירית (רק ב-prod) ─────────────
+  # natbag-watcher רץ כל דקה, מחשב את מדד החריגה (אותה לוגיקה כמו בדף), ומתקשר דרך ימות המשיח
+  # כשהמדד עובר ל"חריגה משמעותית" – לכל היותר שיחה אחת בחצי שעה.
+  WatchTable:
+    Type: AWS::DynamoDB::Table
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "הטבלה מוצפנת כברירת מחדל ב-AWS-owned key; מפתח KMS משלך עולה דולר בחודש, והנתונים הם סטטיסטיקה ציבורית"
+    Condition: IsProd
+    Properties:
+      TableName: natbag-watch
+      # קיבולת קבועה קטנה (10/10) – בתוך ה-Always Free של DynamoDB (25 יחידות), כלומר 0$.
+      # (PAY_PER_REQUEST היה עולה כמה סנטים בחודש על כתיבה כל דקה)
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: { ReadCapacityUnits: 10, WriteCapacityUnits: 10 }
+      AttributeDefinitions: [{ AttributeName: pk, AttributeType: S }]
+      KeySchema: [{ AttributeName: pk, KeyType: HASH }]
+      # גיבוי רציף – אפשר לשחזר את הסטטיסטיקה לכל נקודה ב-35 הימים האחרונים (הטבלה קטנה, העלות זניחה)
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  WatcherFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ: הפונקציה מופעלת סינכרונית (Function URL) או מתזמון שרץ שוב בעוד דקה; כשלים נתפסים ב-CloudWatch Alarms"
+          - id: CKV_AWS_117
+            comment: "VPC: הפונקציה פונה רק לשירותים ציבוריים באינטרנט; VPC היה מחייב NAT Gateway (כ-32 דולר בחודש) בלי תועלת אבטחתית"
+          - id: CKV_AWS_115
+            comment: "Concurrency: מכסת ה-concurrency של החשבון קטנה ולא מאפשרת שמירה; ההגנה היא Budget + Kill Switch שמוריד את ה-concurrency ל-0"
+          - id: CKV_AWS_173
+            comment: "Env encryption: המשתנים מוצפנים ב-AWS-managed key כברירת מחדל; הסודות האמיתיים נשמרים ב-SSM SecureString. מפתח KMS משלך עולה דולר בחודש"
+    Condition: IsProd
+    Properties:
+      FunctionName: natbag-watcher
+      CodeUri: src/watcher/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 30
+      LoggingConfig:
+        LogGroup: !Ref WatcherLogGroup
+      Environment:
+        Variables:
+          PROXY_URL: !GetAtt ProxyUrl.FunctionUrl
+          TABLE: !Ref WatchTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem]
+              Resource: !GetAtt WatchTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/yemot/*
+      Events:
+        EveryMinute:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+
+  WatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "מפתח KMS משלך עולה דולר בחודש (מעבר לתקציב); הלוגים כבר מוצפנים ב-AWS ונשמרים 3–30 ימים בלבד"
+    Condition: IsProd
+    Properties:
+      LogGroupName: /aws/lambda/natbag-watcher
+      RetentionInDays: 3
+
+  AlarmWatcherErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: natbag-watcher-errors
+      AlarmDescription: המעקב בצד השרת (natbag-watcher) נכשל 3 פעמים ב-10 דקות – ההתרעה הטלפונית לא פועלת
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref WatcherFunction }]
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OpsAlertTopic]
+      OKActions: [!Ref OpsAlertTopic]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Condition: IsProd
+    Properties:
+      DashboardName: natbag
+      DashboardBody: !Sub |
+        {
+          "start": "-PT6H",
+          "widgets": [
+            { "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": { "markdown": "## ✈ natbag-monitor\nשרת הביניים, מקורות הנתונים ובדיקת הזמינות. מדדי Natbag נשלחים מהקוד ב-Embedded Metric Format." } },
+            { "type": "alarm", "x": 0, "y": 2, "width": 24, "height": 3,
+              "properties": { "title": "מצב ההתרעות", "alarms": [
+                "${AlarmHealthCheck.Arn}", "${AlarmProxyErrors.Arn}", "${AlarmProxyThrottles.Arn}",
+                "${AlarmProxySlow.Arn}", "${AlarmAdsbDown.Arn}", "${AlarmBoardDown.Arn}", "${AlarmWatcherErrors.Arn}" ] } },
+            { "type": "metric", "x": 0, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "בקשות ושגיאות", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${ProxyFunction}", { "label": "בקשות" } ],
+                  [ ".", "Errors", ".", ".", { "label": "שגיאות", "color": "#d62728" } ],
+                  [ ".", "Throttles", ".", ".", { "label": "נחסמו", "color": "#ff7f0e" } ] ] } },
+            { "type": "metric", "x": 8, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "זמן תגובה (ms)", "region": "${AWS::Region}", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${ProxyFunction}", { "stat": "p50", "label": "חציון" } ],
+                  [ "...", { "stat": "p90", "label": "p90" } ],
+                  [ "...", { "stat": "Maximum", "label": "מקסימום" } ] ] } },
+            { "type": "metric", "x": 16, "y": 5, "width": 8, "height": 6,
+              "properties": { "title": "בדיקת זמינות (כל 5 דקות)", "region": "${AWS::Region}", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "Natbag", "HealthCheckFailed", { "stat": "Sum", "label": "נכשלה", "color": "#d62728" } ],
+                  [ ".", "HealthCheckLatency", { "stat": "Maximum", "label": "זמן (ms)", "yAxis": "right" } ] ] } },
+            { "type": "metric", "x": 0, "y": 11, "width": 12, "height": 6,
+              "properties": { "title": "איזה מקור ADS-B ענה", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries", "stacked": true,
+                "metrics": [
+                  [ "Natbag", "SourceUsed", "Source", "adsb.lol" ],
+                  [ "...", "airplanes.live" ],
+                  [ "...", "adsb.fi" ] ] } },
+            { "type": "metric", "x": 12, "y": 11, "width": 12, "height": 6,
+              "properties": { "title": "מקורות חיצוניים שנכשלו", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                "metrics": [
+                  [ "Natbag", "UpstreamFailure", "Route", "aircraft", { "label": "ADS-B" } ],
+                  [ "...", "mil", { "label": "מטוסים צבאיים" } ],
+                  [ "...", "tracked", { "label": "Flightradar24" } ],
+                  [ "...", "board", { "label": "לוח טיסות (data.gov.il)" } ] ] } },
+            { "type": "metric", "x": 0, "y": 17, "width": 24, "height": 5,
+              "properties": { "title": "מדד החריגה בתנועה האווירית (0 שגרה · 2+ חריגה · 4+ משמעותית)", "region": "${AWS::Region}", "period": 60, "stat": "Maximum", "view": "timeSeries",
+                "metrics": [ [ "Natbag", "AirspaceScore", { "label": "ציון" } ] ],
+                "annotations": { "horizontal": [ { "value": 2, "label": "חריגה", "color": "#ff9900" }, { "value": 4, "label": "משמעותית", "color": "#d62728" } ] } } },
+            { "type": "log", "x": 0, "y": 22, "width": 24, "height": 6,
+              "properties": { "title": "שגיאות אחרונות", "region": "${AWS::Region}", "view": "table",
+                "query": "SOURCE '/aws/lambda/natbag-proxy' | fields @timestamp, route, details | filter level = 'error' | sort @timestamp desc | limit 20" } }
+          ]
+        }
+
+Outputs:
+  ProxyUrl:
+    Description: הכתובת להדביק ב-PROXY_URL בדף (בלי / בסוף)
+    Value: !GetAtt ProxyUrl.FunctionUrl
+  HealthCheck:
+    Description: פתח בדפדפן לבדיקה
+    Value: !Sub "${ProxyUrl.FunctionUrl}health"
+  AtcStreamUrl:
+    Condition: IsProd
+    Description: "שלוחה 5: הכתובת לימות המשיח (שידור חי אינטרנטי) – להוסיף בסוף <ATC_KEY>.mp3 (ראו natbag-aws/README)"
+    Value: !GetAtt AtcUrl.FunctionUrl
+  UserApiUrl:
+    Condition: IsProd
+    Description: API של חשבונות המשתמשים
+    Value: !Sub "https://${UserApi}.execute-api.${AWS::Region}.amazonaws.com"
+  UserPoolId:
+    Condition: IsProd
+    Description: מאגר המשתמשים (להוספת מנהל – ראו README)
+    Value: !Ref UserPool
+  DashboardUrl:
+    Condition: IsProd
+    Description: לוח הניטור ב-CloudWatch
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/natbag"
