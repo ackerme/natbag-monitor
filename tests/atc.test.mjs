@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { pump, authorized, atcKey, SILENT_FRAME, INTRO, HISS } from '../natbag-aws/src/atc/index.mjs';
+import { pump, authorized, atcKey, siteAllowed, SILENT_FRAME, INTRO, HISS } from '../natbag-aws/src/atc/index.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -37,6 +37,17 @@ test('authorized: בלי טוקן מוגדר – פתוח; עם טוקן – ר�
   assert.equal(authorized({ token: 'x' }, 'x'), true);
   assert.equal(authorized({ token: 'y' }, 'x'), false);
   assert.equal(authorized(null, 'x'), false);
+});
+
+test('siteAllowed: /live.mp3 רק מהאתר שלנו (או בלי Referer), ורק בנתיב הזה', () => {
+  const O = ['https://ackerme.github.io'];
+  assert.equal(siteAllowed('/live.mp3', { referer: 'https://ackerme.github.io/natbag-monitor/monitor.html' }, O), true);
+  assert.equal(siteAllowed('/live.mp3', { referer: 'https://ackerme.github.io/' }, O), true);
+  assert.equal(siteAllowed('/live.mp3', {}, O), true);                                              // בלי Referer
+  assert.equal(siteAllowed('/live.mp3', { referer: 'https://evil.example/page' }, O), false);       // אתר אחר
+  assert.equal(siteAllowed('/live.mp3', { referer: 'https://ackerme.github.io.evil.example/' }, O), false);
+  assert.equal(siteAllowed('/llbg.mp3', { referer: 'https://ackerme.github.io/' }, O), false);      // נתיב הטלפון – רק עם סיסמה
+  assert.equal(siteAllowed('/live.mp3', {}, []), false);                                            // לא מוגדר – סגור
 });
 
 test('pump: מזרים עד maxMs, עוקב אחרי הפניות, ומסיים את התשובה', async () => {
