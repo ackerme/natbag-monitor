@@ -1244,8 +1244,11 @@ document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.c
 
 // ===================== ATC RADIO (LiveATC, באישורם) =====================
 // מנגן את שידור LiveATC של נתב"ג ישירות בדפדפן. כמה שרתים לגיבוי: אם אחד לא עונה – עוברים לבא.
+// אם הדפדפן לא מגיע ל-LiveATC בכלל (סינון ברשת, חסימה לפי IP) – השרת שלנו ב-AWS מעביר את אותו שידור.
 {
-  const SRC=['https://d.liveatc.net/llbg2','https://s1-bos.liveatc.net/llbg2','https://s1-fmt2.liveatc.net/llbg2'];
+  const SRC=['https://d.liveatc.net/llbg2',
+             'https://e5pv5wmxejapztm7mvjxfcxijy0kjobq.lambda-url.us-east-1.on.aws/live.mp3',
+             'https://s1-bos.liveatc.net/llbg2','https://s1-fmt2.liveatc.net/llbg2'];
   const btn=document.getElementById('atc'), lbl=btn.querySelector('.lbl');
   let audio=null, idx=0, tmo=null;
   // כל נגן שנוצר נשמר כאן – כדי שעצירה תשתיק את כולם, גם ניסיון קודם שהתחיל לנגן באיחור
@@ -1262,7 +1265,9 @@ document.getElementById('btnCfg').addEventListener('click',()=>{ document.body.c
     a.addEventListener('playing',()=>{ if(audio===a){ clearTimeout(tmo); set('live','חי · LiveATC'); } else kill(a); });
     a.addEventListener('waiting',()=>{ if(audio===a && btn.className==='live') set('wait','קולט…'); });
     a.addEventListener('error',()=>{ if(audio===a) tryNext(); });
-    tmo=setTimeout(()=>{ if(audio===a && btn.className!=='live') tryNext(); },9000);
+    // השרת שלנו מסיים חיבור אחרי 10 דקות – מתחברים מחדש לאותו מקור בלי שהמאזין ירגיש
+    a.addEventListener('ended',()=>{ if(audio===a){ idx=Math.max(0,idx-1); tryNext(); } });
+    tmo=setTimeout(()=>{ if(audio===a && btn.className!=='live') tryNext(); },7000);
     a.play().catch(()=>{ if(audio===a) tryNext(); });
   };
   btn.addEventListener('click',()=>{ if(audio||all.size){ stop(); return; } idx=0; set('wait','מתחבר…'); tryNext(); });
