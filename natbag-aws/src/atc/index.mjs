@@ -98,17 +98,32 @@ export async function pump({ out, upstream, maxMs, fetchImpl = fetch, retryMs = 
   return { bytes, connects };
 }
 
+/**
+ * כפתור "קשר מגדל" באתר: גיבוי למי שהדפדפן שלו לא מצליח לנגן ישירות מ-LiveATC
+ * (סינון ברשת, חסימת Cloudflare לפי כתובת IP וכו'). נתיב ציבורי /live.mp3 – בלי סיסמה,
+ * אבל רק כשהבקשה מגיעה מהאתר שלנו (Referer), או בלי Referer בכלל (דפדפנים עם פרטיות מחמירה).
+ * אתר אחר שמנסה "לשאול" את השידור שלנו נחסם.
+ */
+export function siteAllowed(path, headers = {}, origins = []) {
+  if (path !== "/live.mp3" || !origins.length) return false;
+  const ref = String(headers.referer || headers.Referer || "");
+  return !ref || origins.some(o => ref === o || ref.startsWith(o + "/"));
+}
+
 const log = (msg, extra = {}) => console.log(JSON.stringify({ msg, ...extra }));
 
 async function main(event, responseStream) {
   const method = event?.requestContext?.http?.method || "GET";
   const path = event?.rawPath || "/";
   const query = event?.queryStringParameters || {};
-  const token = await getIvrToken();
+  const origins = String(process.env.SITE_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const site = siteAllowed(path, event?.headers, origins);
+  const token = site ? null : await getIvrToken();
   // שלוחה 5 תמיד דורשת סיסמה: בלי סיסמה (או אם לא הצלחנו לקרוא אותה) – דוחים
-  const ok = !!token && authorized(query, token, path);
+  const ok = site || (!!token && authorized(query, token, path));
   const http = event?.requestContext?.http || {};
-  log("בקשה", { method, path: ok ? "(מורשה)" : path.slice(0, 12), token: query.token || query.key ? "יש" : "אין", authorized: ok,
+  log("בקשה", { method, path: site ? "/live.mp3" : ok ? "(מורשה)" : path.slice(0, 12), from: site ? "אתר" : "טלפון",
+                token: query.token || query.key ? "יש" : "אין", authorized: ok,
                 ip: http.sourceIp, ua: String(http.userAgent || "").slice(0, 80) });
   try {
     if (!ok) {
@@ -127,6 +142,7 @@ async function main(event, responseStream) {
         "icy-pub": "0",
         "icy-name": "LLBG Tower - natbag-monitor",
         "icy-description": "Ben Gurion ATC audio courtesy of LiveATC.net",
+        ...(site && origins[0] ? { "Access-Control-Allow-Origin": origins[0], "Vary": "Origin" } : {}),
       },
     });
     if (method === "HEAD") { s.end(); return; }
@@ -134,7 +150,9 @@ async function main(event, responseStream) {
     const res = await pump({
       out: s,
       upstream: process.env.UPSTREAM_URL || "http://d.liveatc.net/llbg2",
-      maxMs: Number(process.env.MAX_MS || 14 * 60_000),
+      // באתר: 10 דקות לחיבור, והדפדפן מתחבר מחדש לבד. Lambda לא מרגישה כשמאזין סוגר את הלשונית,
+      // אז חיבור קצר יותר = פחות זמן ריצה מבוזבז
+      maxMs: site ? Number(process.env.SITE_MAX_MS || 10 * 60_000) : Number(process.env.MAX_MS || 14 * 60_000),
       log,
     });
     log("שיחה הסתיימה", { seconds: Math.round((Date.now() - t0) / 1000), ...res });
