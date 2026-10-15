@@ -180,6 +180,8 @@ Resources:
         Variables:
           UPSTREAM_URL: http://d.liveatc.net/llbg2
           IVR_TOKEN_PARAM: /natbag/ivr/token
+          # כפתור "קשר מגדל" באתר: /live.mp3 בלי סיסמה, רק מהאתר הזה (גיבוי כשהדפדפן לא מגיע ל-LiveATC)
+          SITE_ORIGINS: !Ref SiteOrigin
           IVR_TOKEN: !Ref IvrToken             # גיבוי לתקופת מעבר בלבד
       Policies:
         - Statement:
@@ -206,7 +208,7 @@ Resources:
       checkov:
         skip:
           - id: CKV_AWS_258
-            comment: "ימות המשיח לא יודעת להזדהות מול AWS; ההגנה היא token=<IVR_TOKEN> בכתובת, Budget ו-Kill Switch"
+            comment: "ימות המשיח והדפדפן לא יודעים להזדהות מול AWS; ההגנה: מפתח בכתובת (טלפון), Referer של האתר (/live.mp3), Budget ו-Kill Switch"
     Properties:
       TargetFunctionArn: !GetAtt AtcFunction.Arn
       AuthType: NONE
@@ -630,14 +632,14 @@ Resources:
     Condition: IsProd
     Properties:
       AlarmName: natbag-atc-invocations-high
-      AlarmDescription: יותר מ-30 חיבורים בשעה לשלוחה 5 (קולות הקשר) – לבדוק שאין שימוש לרעה
+      AlarmDescription: יותר מ-60 חיבורים בשעה לקולות הקשר (שלוחה 5 + גיבוי האתר) – לבדוק שאין שימוש לרעה
       Namespace: AWS/Lambda
       MetricName: Invocations
       Dimensions: [{ Name: FunctionName, Value: !Ref AtcFunction }]
       Statistic: Sum
       Period: 3600
       EvaluationPeriods: 1
-      Threshold: 30
+      Threshold: 60
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OpsAlertTopic]
