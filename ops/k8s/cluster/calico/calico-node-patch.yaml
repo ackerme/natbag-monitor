@@ -1,0 +1,18 @@
+# תיקון ל-DaemonSet של calico-node (Kustomize ממזג את זה לתוך הקובץ הרשמי)
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: calico-node
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: calico-node
+          env:
+            # למכונה יש 2 כרטיסי רשת – משתמשים בכתובת שה-node מדווח (192.168.10.119), לא ב-NAT
+            - name: IP_AUTODETECTION_METHOD
+              value: kubernetes-internal-ip
+            # אותו טווח כמו podSubnet ב-kubeadm-config.yaml
+            - name: CALICO_IPV4POOL_CIDR
+              value: "10.244.0.0/16"
