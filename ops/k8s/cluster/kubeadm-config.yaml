@@ -1,12 +1,12 @@
-   # הגדרות הקמת האשכול – kubeadm init --config kubeadm-config.yaml
-   apiVersion: kubeadm.k8s.io/v1beta4
-   kind: ClusterConfiguration
-   kubernetesVersion: v1.35.8          # בדיוק הגרסה של kubeadm ו-kubelet שמותקנים
-   clusterName: natbag
-   networking:
-     podSubnet: 10.244.0.0/16          # כתובות ל-Pods (לא חופף לרשת הביתית 192.168.x.x)
-     serviceSubnet: 10.96.0.0/12       # כתובות ל-Services (ברירת המחדל)
-
-   apiVersion: kubelet.config.k8s.io/v1beta1
-   kind: KubeletConfiguration
-   cgroupDriver: systemd               # אותו דבר כמו SystemdCgroup = true ב-containerd (צעד 2)
+# הגדרות הקמת האשכול – kubeadm init --config kubeadm-config.yaml
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.35.8          # בדיוק הגרסה של kubeadm ו-kubelet שמותקנים
+clusterName: natbag
+networking:
+  podSubnet: 10.244.0.0/16          # כתובות ל-Pods (לא חופף לרשת הביתית 192.168.x.x)
+  serviceSubnet: 10.96.0.0/12       # כתובות ל-Services (ברירת המחדל)
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd               # אותו דבר כמו SystemdCgroup = true ב-containerd (צעד 2)
