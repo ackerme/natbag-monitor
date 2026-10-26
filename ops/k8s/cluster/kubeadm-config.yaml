@@ -1,3 +1,16 @@
+# הגדרות למכונה הזאת (ה-Control Plane)
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 192.168.10.119   # הכתובת שה-API server מפרסם (הכרטיס של הרשת הביתית)
+  bindPort: 6443                     # הפורט הסטנדרטי של Kubernetes API
+nodeRegistration:
+  name: master                       # שם ה-node באשכול – אותיות קטנות בלבד
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip                  # ה-kubelet ישתמש בכתובת הזאת ולא ב-10.0.3.15 של ה-NAT
+      value: 192.168.10.119
+---
 # הגדרות הקמת האשכול – kubeadm init --config kubeadm-config.yaml
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
