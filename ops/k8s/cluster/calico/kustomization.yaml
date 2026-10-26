@@ -1,0 +1,11 @@
+# Calico – רשת ל-Pods + NetworkPolicy
+# הפעלה:   kubectl apply --server-side -k ops/k8s/cluster/calico
+# תצוגה:   kubectl kustomize ops/k8s/cluster/calico
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # הקובץ הרשמי, בגרסה נעולה – לשדרוג משנים רק את המספר
+  - https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/calico.yaml
+patches:
+  # השינויים שלנו לקובץ הרשמי
+  - path: calico-node-patch.yaml
