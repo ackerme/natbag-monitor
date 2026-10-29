@@ -1,0 +1,55 @@
+# בונה את ה-image של ה-exporter ודוחף ל-ghcr.io – בשביל Kubernetes
+name: Images
+
+on:
+  push:
+    branches: [main]
+    paths:                                    # רק כשמשהו שקשור ל-exporter השתנה
+      - ops/monitoring/exporter/**
+      - natbag-aws/src/proxy/flights.mjs
+      - .github/workflows/images.yml
+  workflow_dispatch: {}                       # הרצה ידנית מלשונית Actions
+
+permissions:
+  contents: read
+
+jobs:
+  exporter:
+    name: natbag-exporter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write                         # מותר לדחוף ל-ghcr.io של ה-repo הזה בלבד
+    steps:
+      - name: הורדת הקוד
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: הכנת Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: התחברות ל-ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: שם ותגיות ל-image
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/natbag-exporter
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=latest
+
+      - name: בנייה ודחיפה
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .                          # שורש ה-repo – ה-Dockerfile צריך גם את flights.mjs
+          file: ops/monitoring/exporter/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
