@@ -4,7 +4,7 @@ kind: Service
 metadata:
   name: exporter
   namespace: natbag
-    labels:
+  labels:
     app: exporter
 spec:
   type: ClusterIP              # נגיש רק מתוך האשכול
