@@ -1,0 +1,58 @@
+# ממסר השמע של שלוחה 5 – פורט 8000
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay
+  namespace: natbag
+  labels:
+    app: relay
+spec:
+  replicas: 1                # עותק אחד: כל עותק = חיבור נוסף ל-LiveATC
+  strategy:
+    type: Recreate           # בעדכון: קודם עוצרים את הישן, אחר כך מעלים חדש
+  selector:
+    matchLabels:
+      app: relay
+  template:
+    metadata:
+      labels:
+        app: relay
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: ghcr.io/ackerme/natbag-relay:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: relay-config
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
