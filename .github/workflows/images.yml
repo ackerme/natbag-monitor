@@ -1,25 +1,37 @@
-# בונה את ה-image של ה-exporter ודוחף ל-ghcr.io – בשביל Kubernetes
+# בונה images ל-Kubernetes ודוחף ל-ghcr.io
+#   natbag-exporter – מדדים ל-Prometheus
+#   natbag-relay    – ממסר השמע של שלוחה 5 (LiveATC, באישורם)
 name: Images
 
 on:
   push:
     branches: [main]
-    paths:                                    # רק כשמשהו שקשור ל-exporter השתנה
+    paths:
       - ops/monitoring/exporter/**
+      - ops/relay/**
       - natbag-aws/src/proxy/flights.mjs
       - .github/workflows/images.yml
-  workflow_dispatch: {}                       # הרצה ידנית מלשונית Actions
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
-  exporter:
-    name: natbag-exporter
+  build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write                         # מותר לדחוף ל-ghcr.io של ה-repo הזה בלבד
+      packages: write
+    strategy:
+      matrix:                                 # ה-job רץ פעם לכל שורה
+        include:
+          - name: natbag-exporter
+            context: .                        # צריך גם את flights.mjs מהשרת
+            file: ops/monitoring/exporter/Dockerfile
+          - name: natbag-relay
+            context: ops/relay
+            file: ops/relay/Dockerfile
     steps:
       - name: הורדת הקוד
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -40,7 +52,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/natbag-exporter
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
           tags: |
             type=sha,format=short,prefix=
             type=raw,value=latest
@@ -48,8 +60,8 @@ jobs:
       - name: בנייה ודחיפה
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
-          context: .                          # שורש ה-repo – ה-Dockerfile צריך גם את flights.mjs
-          file: ops/monitoring/exporter/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
