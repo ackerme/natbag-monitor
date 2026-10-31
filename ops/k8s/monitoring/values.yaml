@@ -16,6 +16,23 @@ grafana:
     nodePort: 30300                    # http://<כל מכונה>:30300
   defaultDashboardsTimezone: Asia/Jerusalem
 
+  # לוח הבקרה של נתב"ג – גרפנה מורידה אותו מהריפו בכל הפעלה
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: natbag
+          folder: natbag
+          type: file
+          disableDeletion: true
+          editable: false
+          options:
+            path: /var/lib/grafana/dashboards/natbag
+  dashboards:
+    natbag:
+      natbag-ops:
+        url: https://raw.githubusercontent.com/ackerme/natbag-monitor/main/ops/monitoring/grafana/dashboards/natbag-ops.json
+
 prometheus:
   prometheusSpec:
     retention: 7d                      # כמה זמן לשמור מדדים
