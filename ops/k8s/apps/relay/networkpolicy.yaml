@@ -1,0 +1,16 @@
+# הממסר ציבורי: כל אחד יכול להאזין – אבל רק לפורט 8000 של השמע
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: relay-allow-listeners
+  namespace: natbag
+spec:
+  podSelector:
+    matchLabels:
+      app: relay
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:                 # אין "from" = מכל מקום
+        - port: 8000
+          protocol: TCP
