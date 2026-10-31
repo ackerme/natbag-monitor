@@ -15,3 +15,7 @@ resources:
   - exporter/deployment.yaml
   - exporter/service.yaml
   - exporter/networkpolicy.yaml
+  - relay/configmap.yaml
+  - relay/deployment.yaml
+  - relay/service.yaml
+  - relay/networkpolicy.yaml
