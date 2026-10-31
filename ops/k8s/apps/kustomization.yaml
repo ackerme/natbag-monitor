@@ -1,0 +1,17 @@
+# כל השירותים של הפרויקט באשכול
+#   תצוגה:  kubectl kustomize ops/k8s/apps
+#   הבדל:   kubectl diff -k ops/k8s/apps
+#   הפעלה:  kubectl apply -k ops/k8s/apps
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: natbag              # כל המשאבים נכנסים ל-natbag
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: natbag-monitor   # תווית משותפת לכל המשאבים
+resources:
+  - namespace.yaml
+  - default-deny.yaml
+  - exporter/configmap.yaml
+  - exporter/deployment.yaml
+  - exporter/service.yaml
+  - exporter/networkpolicy.yaml
