@@ -1,0 +1,14 @@
+# כתובת ושם קבועים ל-exporter בתוך האשכול: exporter.natbag:9877
+apiVersion: v1
+kind: Service
+metadata:
+  name: exporter
+  namespace: natbag
+spec:
+  type: ClusterIP              # נגיש רק מתוך האשכול
+  selector:
+    app: exporter              # מעביר תעבורה ל-Pods עם התווית הזאת
+  ports:
+    - name: metrics
+      port: 9877               # הפורט של ה-Service
+      targetPort: metrics      # השם של הפורט ב-Deployment
