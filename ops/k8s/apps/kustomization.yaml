@@ -20,3 +20,4 @@ resources:
   - relay/service.yaml
   - relay/networkpolicy.yaml
   - exporter/servicemonitor.yaml
+  - relay/servicemonitor.yaml
