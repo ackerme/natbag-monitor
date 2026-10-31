@@ -1,0 +1,17 @@
+# local-path-provisioner – אחסון קבוע (StorageClass) על הדיסק של כל node
+# הפעלה:  kubectl apply -k ops/k8s/cluster/local-path
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # הקובץ הרשמי, בגרסה נעולה
+  - https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.36/deploy/local-path-storage.yaml
+patches:
+  # מסמנים אותו כ-StorageClass ברירת המחדל: כל PVC בלי storageClassName יקבל אותו
+  - target:
+      kind: StorageClass
+      name: local-path
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          storageclass.kubernetes.io/is-default-class: "true"
