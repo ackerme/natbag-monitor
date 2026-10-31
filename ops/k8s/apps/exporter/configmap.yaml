@@ -1,0 +1,9 @@
+# הגדרות ה-exporter – משתני סביבה. משנים כאן, לא בקוד
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exporter-config
+  namespace: natbag
+data:
+  PROXY_URL: https://ivm4jwhxpy5vr5hw6lrdy7uyl40zcvnq.lambda-url.us-east-1.on.aws
+  CACHE_SECONDS: "30"
