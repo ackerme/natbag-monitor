@@ -17,7 +17,7 @@ grafana:
   defaultDashboardsTimezone: Asia/Jerusalem
 
   # לוח הבקרה של נתב"ג – גרפנה מורידה אותו מהריפו בכל הפעלה
-  dashboardProviders:
+dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
       providers:
@@ -31,7 +31,7 @@ grafana:
   dashboards:
     natbag:
       natbag-ops:
-        url: https://raw.githubusercontent.com/ackerme/natbag-monitor/main/ops/monitoring/grafana/dashboards/natbag-ops.json
+        url: https://raw.githubusercontent.com/ackerme/natbag-monitor/main/ops/monitoring/grafana/dashboards/natbag-ops.json  
 
 prometheus:
   prometheusSpec:
