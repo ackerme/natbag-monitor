@@ -1,0 +1,17 @@
+# Argo CD – ההגדרות שלנו
+# התקנה/עדכון:
+#   helm upgrade --install argocd argo/argo-cd --version 10.11.5 \
+#     -n argocd --create-namespace -f ops/k8s/argocd/values.yaml
+
+server:
+  service:
+    type: NodePort
+    nodePortHttps: 30443       # https://<כל מכונה>:30443
+
+# רכיבים שלא צריך כרגע – חוסכים זיכרון
+dex:
+  enabled: false               # התחברות עם GitHub/Google (SSO) – משתמש admin מספיק לנו
+notifications:
+  enabled: false               # התרעות על פריסות (Slack/מייל) – אולי בהמשך
+applicationSet:
+  enabled: false               # יצירת אפליקציות אוטומטית מתבנית – לאשכולות גדולים
