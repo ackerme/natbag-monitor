@@ -1,0 +1,11 @@
+# ברירת מחדל ב-natbag: אף אחד לא נכנס, אלא אם יש חוק שמתיר במפורש
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: natbag
+spec:
+  podSelector: {}              # {} = כל ה-Pods ב-namespace
+  policyTypes:
+    - Ingress                  # חל על תעבורה נכנסת
+  # אין ingress: = שום דבר לא מותר
