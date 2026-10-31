@@ -1,0 +1,8 @@
+# "תיקייה" לכל השירותים של הפרויקט באשכול
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: natbag
+  labels:
+    # Pod Security: האשכול ידחה כל Pod שרץ כ-root או מבקש הרשאות יתר
+    pod-security.kubernetes.io/enforce: restricted
