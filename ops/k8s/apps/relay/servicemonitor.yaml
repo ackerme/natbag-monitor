@@ -1,0 +1,14 @@
+# Prometheus: תאסוף מדדים מממסר השמע (מאזינים, חיבור ל-LiveATC)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: relay
+  namespace: natbag
+spec:
+  selector:
+    matchLabels:
+      app: relay
+  endpoints:
+    - port: http               # הממסר מגיש גם שמע וגם מדדים על אותו פורט
+      path: /metrics
+      interval: 30s
