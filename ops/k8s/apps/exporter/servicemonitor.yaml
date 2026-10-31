@@ -1,0 +1,15 @@
+# Prometheus: תאסוף מדדים מה-exporter כל 30 שניות
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: exporter
+  namespace: natbag
+spec:
+  selector:
+    matchLabels:
+      app: exporter            # ה-Service עם התווית הזאת
+  endpoints:
+    - port: metrics            # השם של הפורט ב-Service
+      path: /metrics
+      interval: 30s
+      
