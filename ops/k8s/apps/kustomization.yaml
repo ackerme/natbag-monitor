@@ -19,3 +19,4 @@ resources:
   - relay/deployment.yaml
   - relay/service.yaml
   - relay/networkpolicy.yaml
+  - exporter/servicemonitor.yaml
