@@ -4,6 +4,8 @@ kind: Service
 metadata:
   name: relay
   namespace: natbag
+    labels:
+    app: relay
 spec:
   type: NodePort
   selector:
