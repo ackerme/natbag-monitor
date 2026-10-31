@@ -1,0 +1,59 @@
+# kube-prometheus-stack – ההגדרות שלנו (כל השאר: ברירות המחדל של ה-chart)
+# התקנה/עדכון:
+#   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#     --version 92.16.2 -n monitoring -f ops/k8s/monitoring/values.yaml
+
+grafana:
+  admin:
+    existingSecret: grafana-admin      # הסיסמה ב-Secret שיוצרים ידנית – לא בגיט
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: true                      # דשבורדים והגדרות נשמרים ב-PVC (local-path)
+    size: 1Gi
+  service:
+    type: NodePort
+    nodePort: 30300                    # http://<כל מכונה>:30300
+  defaultDashboardsTimezone: Asia/Jerusalem
+
+prometheus:
+  prometheusSpec:
+    retention: 7d                      # כמה זמן לשמור מדדים
+    retentionSize: 4GB                 # ולא יותר מ-4GB בדיסק
+    # Prometheus יקרא כל ServiceMonitor באשכול – לא רק כאלה שנוצרו עם ה-chart
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        memory: 1Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+# ב-kubeadm הרכיבים האלה מאזינים רק ל-127.0.0.1 – Prometheus לא יכול להגיע אליהם,
+# וההתרעות עליהם היו "נדלקות" כל הזמן בלי סיבה. מכבים את הניטור שלהם.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
