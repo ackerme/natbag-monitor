@@ -1,0 +1,56 @@
+# natbag-exporter: מדדים של מוניטור נתב"ג בשביל Prometheus (פורט 9877)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exporter
+  namespace: natbag
+  labels:
+    app: exporter
+spec:
+  replicas: 1                          # כמה עותקים להריץ
+  selector:
+    matchLabels:
+      app: exporter                    # ה-Deployment מנהל Pods עם התווית הזאת
+  template:                            # מכאן: התבנית של כל Pod
+    metadata:
+      labels:
+        app: exporter
+    spec:
+      automountServiceAccountToken: false   # לא צריך גישה ל-API של Kubernetes
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000                # המשתמש node ב-image
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: exporter
+          image: ghcr.io/ackerme/natbag-exporter:latest
+          imagePullPolicy: Always      # עם latest: תמיד לבדוק אם יש גרסה חדשה
+          envFrom:
+            - configMapRef:
+                name: exporter-config  # כל המשתנים מה-ConfigMap
+          ports:
+            - name: metrics
+              containerPort: 9877
+          readinessProbe:              # "מוכן לקבל תעבורה?"
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 10
+          livenessProbe:               # "עדיין חי? אם לא – הפעל מחדש"
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:                  # כמה ה-scheduler שומר לו
+              cpu: 10m
+              memory: 48Mi
+            limits:                    # מעל זה – Kubernetes הורג אותו
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
