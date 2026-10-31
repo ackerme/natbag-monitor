@@ -1,0 +1,10 @@
+# הגדרות ממסר השמע (קולות הקשר של נתב"ג מ-LiveATC, באישורם)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: relay-config
+  namespace: natbag
+data:
+  UPSTREAM_URL: http://d.liveatc.net/llbg2
+  MOUNT: /llbg.mp3
+  ALWAYS_ON: "false"     # מתחבר ל-LiveATC רק כשמישהו מאזין, ומתנתק 30 שניות אחרי
