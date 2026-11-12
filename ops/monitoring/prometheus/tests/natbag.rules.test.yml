@@ -1,4 +1,5 @@
 # בדיקות יחידה לכללי ההתרעה:  promtool test rules tests/natbag.rules.test.yml
+# (רצות ב-CI בכל push – כלל שבור לא מגיע לניטור)
 rule_files:
   - ../rules/natbag.rules.yml
 evaluation_interval: 1m
@@ -16,12 +17,79 @@ tests:
         alertname: SiteOrApiDown
         exp_alerts:
           - exp_labels: { severity: critical, job: blackbox-http, instance: "https://site" }
-            exp_annotations: { summary: "https://site לא עונה כבר 5 דקות" }
+            exp_annotations:
+              summary: "https://site לא עונה כבר 5 דקות"
+              description: "לבדוק: GitHub Pages (האתר) או ה-Lambda (השרת) – ב-AWS: CloudWatch Logs של natbag-proxy, והאם ה-Kill Switch כיבה אותו."
+
+  - name: ה-exporter נפל → התרעה (בלי זה, אין מדדים ואף התרעה לא נדלקת)
+    interval: 1m
+    input_series:
+      - series: 'up{job="natbag",instance="exporter:9877"}'
+        values: '1 1 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ExporterDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ExporterDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: natbag, instance: "exporter:9877" }
+            exp_annotations:
+              summary: "ה-exporter (natbag-exporter) לא עונה כבר 5 דקות – אין מדדים"
+              description: "לבדוק: docker compose ps בתיקייה ops/monitoring, ולוגים: docker compose logs exporter."
+
+  - name: ה-exporter בכלל לא מוגדר (אין סדרת up) → התרעה
+    interval: 1m
+    input_series:
+      - series: 'up{job="prometheus"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ExporterDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: natbag }
+            exp_annotations:
+              summary: "ה-exporter (natbag-exporter) לא עונה כבר 5 דקות – אין מדדים"
+              description: "לבדוק: docker compose ps בתיקייה ops/monitoring, ולוגים: docker compose logs exporter."
+
+  - name: נתוני מטוסים נפלו 10 דקות → התרעה קריטית
+    interval: 1m
+    input_series:
+      - series: 'natbag_api_up{endpoint="aircraft"}'
+        values: '1 1 0x12'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: AircraftEndpointFailing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: AircraftEndpointFailing
+        exp_alerts:
+          - exp_labels: { severity: critical, endpoint: aircraft }
+            exp_annotations:
+              summary: "השרת לא מחזיר נתוני מטוסים כבר 10 דקות – כנראה כל מקורות ה-ADS-B נפלו"
+              description: "לבדוק ב-CloudWatch Logs של natbag-proxy את השגיאות מול מקורות ה-ADS-B."
+
+  - name: נתוני מטוסים לסירוגין (1 מתוך 4 מצליח) → התרעת חוסר יציבות, לא קריטית
+    interval: 1m
+    input_series:
+      - series: 'natbag_api_up{endpoint="aircraft"}'
+        values: '1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: AircraftEndpointFailing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: AircraftEndpointFlapping
+        exp_alerts:
+          - exp_labels: { severity: warning, endpoint: aircraft }
+            exp_annotations:
+              summary: "נתוני המטוסים לא יציבים – פחות מחצי מהבדיקות הצליחו ב-30 הדקות האחרונות"
+              description: "מקור ADS-B כנראה נופל וחוזר. לבדוק בלוח הבקרה את natbag_api_up לאורך זמן."
 
   - name: אין מטוסים בשעות היום → התרעה
     interval: 1m
     input_series:
-      # הבדיקה מתחילה ב-00:00 UTC; בודקים ב-06:40 UTC = 09:40 בישראל, אחרי שעה בלי מטוסים
+      # הבדיקה מתחילה ב-00:00 UTC; בודקים ב-06:40 UTC, אחרי שעה בלי מטוסים
       - series: 'natbag_aircraft{move="arr"}'
         values: '5x340 0x80'
       - series: 'natbag_aircraft{move="dep"}'
@@ -31,7 +99,19 @@ tests:
         alertname: NoAircraftInDaytime
         exp_alerts:
           - exp_labels: { severity: warning }
-            exp_annotations: { summary: "אין אף מטוס בטווח כבר 30 דקות בשעות היום – לבדוק את מקורות הנתונים" }
+            exp_annotations:
+              summary: "אין אף מטוס בטווח כבר 30 דקות בשעות היום – לבדוק את מקורות הנתונים"
+              description: "אם נתב\"ג פעיל כרגיל – כנראה בעיה במקור הנתונים. אם המרחב האווירי סגור – זה צפוי."
+
+  - name: שעון חורף – 05:20 בבוקר בישראל (03:20 UTC) → עוד לילה, אין התרעה
+    interval: 1m
+    input_series:
+      - series: 'natbag_aircraft{move="other"}'
+        values: '0x210'
+    alert_rule_test:
+      - eval_time: 3h20m
+        alertname: NoAircraftInDaytime
+        exp_alerts: []
 
   - name: אין מטוסים בלילה (03:00 בישראל) → אין התרעה
     interval: 1m

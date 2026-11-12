@@ -18,10 +18,17 @@ route:
     - matchers: ['severity="info"']   # התרעות מידע בלבד (למשל DeviationAlertsSpike) – בלי מייל
       receiver: none
 
-# כשהאתר או השרת למטה – לא שולחים בנוסף את כל ההתרעות שנובעות מזה
+# כשתקלה "גדולה" פעילה – לא שולחים בנוסף את כל ההתרעות שנובעות ממנה (מייל אחד במקום ארבעה)
 inhibit_rules:
+  # האתר או השרת למטה
   - source_matchers: ['alertname="SiteOrApiDown"']
-    target_matchers: ['alertname=~"ApiSlow|AircraftEndpointFailing|NoAircraftInDaytime|HealthcheckStale"']
+    target_matchers: ['alertname=~"ApiSlow|AircraftEndpointFailing|AircraftEndpointFlapping|NoAircraftInDaytime|HealthcheckStale"']
+  # ה-exporter למטה – אין מדדים, אז כל מה שמבוסס עליהם לא אמין
+  - source_matchers: ['alertname="ExporterDown"']
+    target_matchers: ['alertname=~"AircraftEndpointFailing|AircraftEndpointFlapping|NoAircraftInDaytime|HealthcheckStale"']
+  # אין נתוני מטוסים בכלל – "לא יציב" ו"אין מטוסים" הם אותה תקלה
+  - source_matchers: ['alertname="AircraftEndpointFailing"']
+    target_matchers: ['alertname=~"AircraftEndpointFlapping|NoAircraftInDaytime"']
 
 receivers:
   - name: none
@@ -40,6 +47,7 @@ receivers:
             <p style="margin:8px 0;padding:8px;border-right:4px solid {{ if eq .Labels.severity "critical" }}#e0533d{{ else }}#e8b23a{{ end }};background:#f6f6f6">
               <b>{{ .Labels.alertname }}</b> ({{ .Labels.severity }})<br>
               {{ .Annotations.summary }}<br>
+              {{ if .Annotations.description }}<span style="color:#555">🔎 {{ .Annotations.description }}</span><br>{{ end }}
               <small>התחיל: {{ .StartsAt.Format "2006-01-02 15:04 MST" }}{{ if eq .Status "resolved" }} · נפתר: {{ .EndsAt.Format "15:04 MST" }}{{ end }}</small>
             </p>
             {{ end }}
