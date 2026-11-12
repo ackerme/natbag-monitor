@@ -46,7 +46,7 @@ jobs:
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           check "האתר"            "$SITE"
           check "השרת (health)"   "$API/health"  '.ok == true'
-          check "נתוני מטוסים"    "$API/aircraft" '(.ac // .aircraft // []) | type == "array"'
+          check "נתוני מטוסים" "$API/aircraft?lat=32.0055&lon=34.8854&dist=43" '(.ac // .aircraft // []) | type == "array"'
           # בדיקת הזמינות ב-AWS רצה כל 5 דקות – אם לא רצה 20 דקות, משהו נתקע
           check "בדיקת AWS רצה"   "$API/stats"   '.status.lastCheck.t > (now * 1000 - 20 * 60 * 1000)'
           exit $fail
