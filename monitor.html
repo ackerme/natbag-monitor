@@ -1166,33 +1166,26 @@ function layoutBanners(){
 
 // ===================== AIRSPACE ANOMALY =====================
 // מדד חריגה בתנועה האווירית – לא מערכת התרעה
-const airHistory=[], approachSeen={}, lastDist={};
-let airStatus=null;
+const airHistory=[], approachSeen={}, finalSeen={}, lastDist={};
+let airStatus=null, airStable='normal';
 function resetAirspace(){
-  airHistory.length=0;
-  [approachSeen,lastDist,trails,planeHistory].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
+  airHistory.length=0; airStable='normal';
+  [approachSeen,finalSeen,lastDist,trails,planeHistory].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
   airStatus=null; lastAirLevel='normal'; hideAirAlert();
   milNorm=[]; localNorm=[]; lastTankerCount=0; hideTankerAlert(); updateTankers();
   trackedRaw=[]; Object.keys(mtAlerted).forEach(k=>delete mtAlerted[k]); hideTrackedAlert(); updateTracked(); document.title='מוניטור נתב"ג'; renderAirspace();
 }
+// אותו חישוב בדיוק כמו בשרת (natbag-watcher): detect.js
 function updateAirspace(planes){
-  const now=Date.now(); let holding=0, turnBacks=0, emergencies=0;
-  planes.forEach(p=>{
-    p.isHolding = !p.onGround && NatbagDetect.isHolding(trails[p.icao24]);
-    if(p.isApproach) approachSeen[p.icao24]=now;
-    p.isTurnBack = NatbagDetect.isTurnBack({
-      wasApproaching: approachSeen[p.icao24] && now-approachSeen[p.icao24] <= 10*60e3,
-      onGround:p.onGround, isApproach:p.isApproach, dev:p.dev, prevDist:lastDist[p.icao24], dist:p.dist });
-    lastDist[p.icao24]=p.dist;
-    if(p.cls!=='passenger') return;              // המדד סופר רק מטוסי נוסעים/מסחריים
-    if(p.isHolding) holding++;
-    if(p.isTurnBack) turnBacks++;
-    if(p.squawk==='7700'||p.squawk==='7600') emergencies++;
-  });
-  const pax=planes.filter(p=>p.cls==='passenger');
-  airHistory.push({ t:now, airborne:pax.filter(p=>!p.onGround).length, finals:pax.filter(p=>p.isFinal).length, holding, turnBacks, emergencies });
+  const now=Date.now();
+  const sample=NatbagDetect.airspaceSample(planes, {trails, approachSeen, finalSeen, lastDist}, now);
+  airHistory.push(sample);
   while(airHistory.length && now-airHistory[0].t > 60*60e3) airHistory.shift();
-  airStatus=NatbagDetect.airspaceStatus(airHistory, now);
+  const raw=NatbagDetect.airspaceStatus(airHistory, now);
+  sample.raw=NatbagDetect.RANK[raw.level];
+  // רמה יציבה: נכנסת רק אחרי 3 דקות ברצף, יוצאת אחרי 5 דקות רגועות – בלי קפיצות של דקה
+  airStable=NatbagDetect.stableLevel(airHistory, airStable, now);
+  airStatus={...raw, rawLevel:raw.level, level:airStable};
   onAirLevel(airStatus);
   renderAirspace();
 }
@@ -1204,9 +1197,10 @@ function renderAirspace(){
     (s.baselineReady?'':` <small>לומד את הקצב הרגיל, ${Math.min(s.collectedMin,10)} מתוך 10 דק'</small>`);
   document.getElementById('airstBody').innerHTML =
     (s.reasons.length?`<ul>${s.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:'לא זוהו סימנים חריגים.') +
+    (s.rawLevel && NatbagDetect.RANK[s.rawLevel]>NatbagDetect.RANK[s.level]?`<div class="note">בבדיקה: אם זה יימשך 3 דקות ברצף, המדד יעלה.</div>`:'') +
     (airEvents.length?`<div class="ev">היסטוריה: ${airEvents.slice(0,6).map(e=>`<span>${new Date(e.t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})} ${{normal:'שגרה',unusual:'חריגה',major:'משמעותית'}[e.level]}</span>`).join('')}</div>`:'') +
     (('Notification' in window && Notification.permission==='default')?`<button class="nb" onclick="Notification.requestPermission().then(renderAirspace)">קבלו התראה גם כשהדף ברקע</button>`:'') +
-    `<div class="note">המדד מתבסס על התנועה האווירית בלבד: מטוסים בהמתנה, מטוסים שהסתובבו, נחיתות שנעצרו, ירידה במספר המטוסים וקודי חירום.
+    `<div class="note">המדד מתבסס על התנועה האווירית בלבד: מטוסים בהמתנה, מטוסים שהסתובבו, גישות מוחמצות, ירידה חדה בגובה נמוך, נחיתות שנעצרו, ירידה במספר המטוסים וקודי חירום. שינוי ברמה נרשם רק אם הוא נמשך כמה דקות.
      ההתרעה שלו <b>אינה</b> התרעת פיקוד העורף ולא יודעת לחזות אירועים ביטחוניים. להתרעות ולהנחיות – אפליקציית פיקוד העורף.</div>`;
 }
 document.getElementById('airstBtn').addEventListener('click',()=>{ renderAirspace(); document.getElementById('airst').classList.toggle('open'); });
