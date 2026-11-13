@@ -2,8 +2,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { step, shouldCall, callText, yemotCall, emptyState, CALL_GAP_MS, sayClean } from '../natbag-aws/src/watcher/index.mjs';
-import { emergencyOf, emergencies, emergencyStep, emergencyText, RECALL_MS } from '../natbag-aws/src/watcher/emergency.mjs';
+import { step, shouldCall, callText, yemotCall, emptyState, CALL_GAP_MS, sayClean, channelsOf, anomalyEmail } from '../natbag-aws/src/watcher/index.mjs';
+import { emergencyOf, emergencies, emergencyStep, emergencyText, emergencyEmail, RECALL_MS } from '../natbag-aws/src/watcher/emergency.mjs';
+
+test('ערוצי התרעה: ברירת מחדל מייל בלבד (בחינם); טלפון רק אם הופעל', () => {
+  assert.deepEqual([...channelsOf({})], ['email']);
+  assert.deepEqual([...channelsOf({ ALERT_CHANNELS: 'email, phone' })], ['email', 'phone']);
+  assert.ok(!channelsOf({ ALERT_CHANNELS: 'email' }).has('phone'));
+});
+
+test('מייל חירום: נושא קצר באנגלית, גוף בעברית עם הפרטים, קישורים והסתייגות', () => {
+  const list = emergencies([{ hex: '738abc', flight: 'ELY001 ', r: '4X-EDA', t: 'B789', squawk: '7700', lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300 }]);
+  const m = emergencyEmail(list);
+  assert.equal(m.subject, 'natbag: EMERGENCY squawk 7700 - ELY001');
+  assert.ok(m.subject.length < 100);
+  assert.match(m.body, /משדר קוד 7700 – מצב חירום/);
+  assert.match(m.body, /אל על טיסה 1 \(בואינג 787\) · אות קריאה ELY001 · רישום 4X-EDA/);
+  assert.match(m.body, /\d+ ק"מ \S+.* לנתב"ג · גובה 2700 מ' · \d+ קמ"ש/);
+  assert.match(m.body, /globe\.adsbexchange\.com\/\?icao=738abc/);
+  assert.match(m.body, /monitor\.html/);
+  assert.match(m.body, /אינה התרעה של פיקוד העורף/);
+  // כמה מטוסים בבת אחת
+  assert.match(emergencyEmail([...list, ...list]).subject, /\(\+1\)$/);
+});
+
+test('מייל חריגה: הסיבות ברשימה, וההסתייגות', () => {
+  const m = anomalyEmail({ level: 'major', score: 5, reasons: ['3 מטוסים בהמתנה', 'מטוס משדר קוד חירום (7700/7600)'] });
+  assert.equal(m.subject, 'natbag: airspace anomaly (major, score 5)');
+  assert.match(m.body, /• 3 מטוסים בהמתנה\n• מטוס משדר קוד חירום/);
+  assert.match(m.body, /לא התרעה של פיקוד העורף/);
+});
 
 test('watcher: flights.mjs זהה לזה של השרת (אותו ניסוח כמו בקו)', () => {
   const a = readFileSync(new URL('../natbag-aws/src/proxy/flights.mjs', import.meta.url), 'utf8');

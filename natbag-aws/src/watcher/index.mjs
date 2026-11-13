@@ -1,13 +1,14 @@
 // natbag-watcher — זיהוי חריגה בתנועה האווירית בצד השרת, כל דקה, גם כשאף דף לא פתוח.
 // משתמש באותה לוגיקה בדיוק כמו הדף (detect.cjs = עותק של detect.js; בדיקה ב-tests מוודאת שהם זהים).
-// כשהמדד עובר ל"חריגה משמעותית" – מתקשר לטלפון שהוגדר, דרך ימות המשיח (קמפיין עם הקראה).
-// לכל היותר שיחה אחת בחצי שעה. זה מדד לתנועה אווירית בלבד, לא מערכת התרעה ביטחונית.
+// התרעות: מטוס שמשדר קוד חירום (מיד), או חריגה משמעותית במדד (לכל היותר פעם בחצי שעה).
+// נשלחות במייל (SNS, בחינם); שיחת טלפון דרך ימות המשיח רק אם ALERT_CHANNELS כולל phone (עולה יחידות).
+// זה מדד לתנועה אווירית בלבד, לא מערכת התרעה ביטחונית.
 //
 // מצב (היסטוריה, שובלים) נשמר ב-DynamoDB, כי כל הרצה של Lambda מתחילה בלי זיכרון.
 // פרטי ימות המשיח נקראים מ-SSM: /natbag/yemot/username, /natbag/yemot/password, /natbag/yemot/phone
 
 import { createRequire } from "node:module";
-import { emergencies, emergencyStep, emergencyText } from "./emergency.mjs";
+import { emergencies, emergencyStep, emergencyText, emergencyEmail, SITE_URL } from "./emergency.mjs";
 const D = createRequire(import.meta.url)("./detect.cjs");
 
 export const TLV = { lat: 32.0055, lon: 34.8854 };
@@ -155,24 +156,62 @@ async function loadYemot() {
 }
 const log = obj => process.stdout.write(JSON.stringify(obj) + "\n");
 
-export const handler = async (event = {}) => {
-  // בדיקה ידנית: aws lambda invoke --function-name natbag-watcher --payload '{"testCall":true}' ...
-  if (event.testCall) {
-    const creds = await loadYemot();
-    if (!creds) return { ok: false, error: "חסרים פרמטרים של ימות המשיח ב-SSM (/natbag/yemot/*)" };
-    const res = await yemotCall(creds, sayClean("זו שיחת בדיקה מקו מידע הטיסות של נמל התעופה בן גוריון. ההתרעות הטלפוניות פועלות"));
-    log({ level: "info", testCall: true, ...res });
-    return { ok: true, ...res };
+// ───────── שליחת התרעה: מייל (SNS) תמיד, שיחת טלפון רק אם הופעלה ─────────
+// ALERT_CHANNELS: "email" (ברירת מחדל, בחינם) או "email,phone" (שיחות בימות המשיח עולות יחידות)
+export const channelsOf = env => new Set(String(env.ALERT_CHANNELS || "email").split(",").map(s => s.trim()).filter(Boolean));
+
+export function anomalyEmail(status) {
+  return {
+    subject: `natbag: airspace anomaly (${status.level}, score ${status.score})`,
+    body: ["⚠️ חריגה משמעותית בתנועה האווירית סביב נמל התעופה בן גוריון", "",
+      ...(status.reasons || []).map(r => `• ${r}`), "",
+      `הרדאר באתר: ${SITE_URL}`, "",
+      "מדד לתנועה האווירית בלבד – לא התרעה של פיקוד העורף."].join("\n"),
+  };
+}
+
+async function sendAlert({ subject, body, speech }, env = process.env) {
+  const ch = channelsOf(env), out = {};
+  if (ch.has("email")) {
+    try {
+      if (!env.ALERT_TOPIC_ARN) throw new Error("ALERT_TOPIC_ARN לא מוגדר");
+      const { SNSClient, PublishCommand } = await import("@aws-sdk/client-sns");
+      const r = await new SNSClient({}).send(new PublishCommand({ TopicArn: env.ALERT_TOPIC_ARN, Subject: subject, Message: body }));
+      out.email = { messageId: r.MessageId };
+    } catch (e) { out.email = { error: e.message }; }
   }
-  // בדיקה ידנית של התרעת חירום (מטוס מדומה): --payload '{"testEmergency":true}'
+  if (ch.has("phone")) {
+    try {
+      const creds = await loadYemot();
+      out.phone = creds ? await yemotCall(creds, sayClean(speech)) : { skipped: "אין פרטי ימות המשיח ב-SSM" };
+    } catch (e) { out.phone = { error: e.message }; }
+  }
+  out.sent = !!(out.email?.messageId || out.phone?.campaignId);
+  return out;
+}
+
+const FAKE_EMERGENCY = { hex: "test", flight: "ELY001", r: "4X-EDA", t: "B789", squawk: "7700",
+  lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300 };
+
+export const handler = async (event = {}) => {
+  // בדיקה ידנית: aws lambda invoke --function-name natbag-watcher --payload '{"testCall":true}' ...  (שיחה בלבד)
+  if (event.testCall) {
+    try {
+      const creds = await loadYemot();
+      if (!creds) return { ok: false, error: "חסרים פרמטרים של ימות המשיח ב-SSM (/natbag/yemot/*)" };
+      const res = await yemotCall(creds, sayClean("זו שיחת בדיקה מקו מידע הטיסות של נמל התעופה בן גוריון. ההתרעות הטלפוניות פועלות"));
+      log({ level: "info", testCall: true, ...res });
+      return { ok: true, ...res };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+  // בדיקה של התרעת חירום (מטוס מדומה) בכל הערוצים שהופעלו: --payload '{"testEmergency":true}'
   if (event.testEmergency) {
-    const creds = await loadYemot();
-    if (!creds) return { ok: false, error: "חסרים פרמטרים של ימות המשיח ב-SSM (/natbag/yemot/*)" };
-    const fake = { hex: "test", flight: "ELY001", t: "B789", squawk: "7700", lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300 };
-    const text = sayClean("שיחת בדיקה , " + emergencyText(emergencies([fake])));
-    const res = await yemotCall(creds, text);
-    log({ level: "info", testEmergency: true, text, ...res });
-    return { ok: true, text, ...res };
+    const list = emergencies([FAKE_EMERGENCY]);
+    const mail = emergencyEmail(list);
+    const res = await sendAlert({ subject: `[TEST] ${mail.subject}`, body: `*** הודעת בדיקה – אין מטוס בחירום ***\n\n${mail.body}`,
+                                  speech: "שיחת בדיקה , " + emergencyText(list) });
+    log({ level: "info", testEmergency: true, ...res });
+    return { ok: res.sent, ...res };
   }
 
   const now = Date.now();
@@ -185,29 +224,23 @@ export const handler = async (event = {}) => {
   const prev = (await loadJson(process.env.TABLE, "state")) || emptyState();
   const { state, status, planes } = step(prev, ac, now);
 
-  // מטוס בחירום (7700/7600/7500) – שיחה מיידית, בלי לחכות למדד. קודם לשיחת החריגה
+  // מטוס בחירום (7700/7600/7500) – התרעה מיידית, בלי לחכות למדד. קודמת להתרעת החריגה
   const emerg = emergencies(ac);
   const es = emergencyStep(prev.emergency, emerg, now);
   state.emergency = es.seen;
-  let emergencyCall = null;
+  let emergencyAlert = null;
   if (es.toCall.length) {
-    try {
-      const creds = await loadYemot();
-      if (creds) {
-        emergencyCall = await yemotCall(creds, sayClean(emergencyText(es.toCall)));
-        for (const e of es.toCall) state.emergency[e.id].calledAt = now;
-        state.lastCallAt = now;            // שיחת החריגה (שכנראה נובעת מאותו מטוס) תחכה חצי שעה
-      } else emergencyCall = { skipped: "אין פרטי ימות המשיח ב-SSM" };
-    } catch (e) { emergencyCall = { error: e.message }; }
+    emergencyAlert = await sendAlert({ ...emergencyEmail(es.toCall), speech: emergencyText(es.toCall) });
+    if (emergencyAlert.sent) {
+      for (const e of es.toCall) state.emergency[e.id].calledAt = now;
+      state.lastCallAt = now;              // התרעת החריגה (שכנראה נובעת מאותו מטוס) תחכה חצי שעה
+    }
   }
 
   let call = null;
-  if (!emergencyCall?.campaignId && shouldCall(prev.lastLevel, status, state.lastCallAt ?? prev.lastCallAt, now)) {
-    try {
-      const creds = await loadYemot();
-      if (creds) { call = await yemotCall(creds, callText(status)); state.lastCallAt = now; }
-      else call = { skipped: "אין פרטי ימות המשיח ב-SSM" };
-    } catch (e) { call = { error: e.message }; }
+  if (!emergencyAlert?.sent && shouldCall(prev.lastLevel, status, state.lastCallAt ?? prev.lastCallAt, now)) {
+    call = await sendAlert({ ...anomalyEmail(status), speech: callText(status) });
+    if (call.sent) state.lastCallAt = now;
   }
   state.lastLevel = status.level;
   await saveJson(process.env.TABLE, "state", state);
@@ -223,6 +256,6 @@ export const handler = async (event = {}) => {
           Metrics: [{ Name: "AirspaceScore", Unit: "Count" }, { Name: "EmergencyAircraft", Unit: "Count" }] }] },
         AirspaceScore: status.score, EmergencyAircraft: emerg.length, level: status.level, reasons: status.reasons,
         baselineReady: status.baselineReady, call,
-        emergency: emerg.map(e => ({ id: e.id, cs: String(e.a.flight || "").trim(), code: e.code })), emergencyCall });
-  return { level: status.level, score: status.score, call, emergencyCall, emergencies: emerg.length };
+        emergency: emerg.map(e => ({ id: e.id, cs: String(e.a.flight || "").trim(), code: e.code })), emergencyAlert });
+  return { level: status.level, score: status.score, call, emergencyAlert, emergencies: emerg.length };
 };

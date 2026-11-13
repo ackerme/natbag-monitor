@@ -1,4 +1,4 @@
-// emergency.mjs – מטוס שמשדר קוד חירום ליד נתב"ג → שיחת טלפון (דרך ימות המשיח)
+// emergency.mjs – מטוס שמשדר קוד חירום ליד נתב"ג → התרעה במייל (ושיחת טלפון, אם הופעלה)
 //
 // מקור: נתוני ADS-B פתוחים. כל מטוס משדר "squawk" (קוד בן 4 ספרות). שלושה קודים שמורים לחירום:
 //   7700 – מצב חירום · 7600 – תקלת קשר רדיו · 7500 – התערבות בלתי חוקית בטיסה
@@ -6,7 +6,7 @@
 //
 // דיוק – למה לא מתקשרים בדגימה הראשונה:
 //   • קוד חירום "מהבהב" לשנייה קורה (טייס שמעביר בין קודים, או טעות במקלט) → מחכים לשתי דגימות רצופות (~2 דקות)
-//   • אותו מטוס לא מתקשר פעמיים: לכל היותר שיחה אחת לכל מטוס בכל 3 שעות
+//   • אותו מטוס לא מתריע פעמיים: לכל היותר התרעה אחת לכל מטוס בכל 3 שעות
 // זה מידע על תנועה אווירית בלבד, לא מערכת התרעה ביטחונית.
 
 import { planesNear, TLV, haversine } from "./flights.mjs";
@@ -75,4 +75,33 @@ export function emergencyText(list) {
   parts.push("המידע מבוסס על נתוני רדאר פתוחים ועלול להיות שגוי",
              "זו התרעה על תנועה אווירית בלבד ואינה התרעה של פיקוד העורף");
   return parts.join(" , ");
+}
+
+export const SITE_URL = "https://ackerme.github.io/natbag-monitor/monitor.html";
+
+/**
+ * אותה התרעה במייל (SNS): נושא קצר באנגלית (נראה טוב בכל תיבת דואר) + גוף בעברית עם הפרטים וקישורים.
+ */
+export function emergencyEmail(list) {
+  const first = list[0];
+  const cs = String(first?.a?.flight || "").trim() || first?.id || "";
+  const subject = `natbag: EMERGENCY${first?.code ? ` squawk ${first.code}` : ""}${cs ? ` - ${cs}` : ""}` +
+                  `${list.length > 1 ? ` (+${list.length - 1})` : ""}`;
+  const lines = ["🚨 התרעת חירום – מוניטור נתב\"ג", ""];
+  for (const e of list) {
+    const [p] = planesNear([e.a], 10000);
+    const a = e.a || {};
+    lines.push(`מטוס ליד נמל התעופה בן גוריון משדר${e.code ? ` קוד ${e.code}` : ""} – ${e.meaning}`);
+    if (p) {
+      lines.push(`• מי: ${p.name}${p.model ? ` (${p.model})` : ""}${String(a.flight || "").trim() ? ` · אות קריאה ${String(a.flight).trim()}` : ""}${a.r ? ` · רישום ${a.r}` : ""}`);
+      lines.push(`• איפה: ${Math.round(p.dist)} ק"מ ${p.dir} לנתב"ג${p.altM ? ` · גובה ${p.altM} מ'` : ""}${p.kmh ? ` · ${Math.round(p.kmh)} קמ"ש` : ""}`);
+      lines.push(`• מה הוא עושה: ${p.phase}`);
+    }
+    if (a.hex) lines.push(`• מפה חיה: https://globe.adsbexchange.com/?icao=${encodeURIComponent(a.hex)}`);
+    lines.push("");
+  }
+  lines.push(`הרדאר באתר: ${SITE_URL}`, "",
+             "המידע מבוסס על נתוני ADS-B פתוחים ועלול להיות שגוי.",
+             "זו התרעה על תנועה אווירית בלבד ואינה התרעה של פיקוד העורף.");
+  return { subject: subject.slice(0, 99), body: lines.join("\n") };
 }

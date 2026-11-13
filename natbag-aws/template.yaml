@@ -800,11 +800,18 @@ Resources:
         Variables:
           PROXY_URL: !GetAtt ProxyUrl.FunctionUrl
           TABLE: !Ref WatchTable
+          # התרעות (מטוס בחירום / חריגה משמעותית) – במייל, לנושא של התרעות המערכת.
+          # "email,phone" מוסיף שיחת טלפון בימות המשיח (עולה יחידות)
+          ALERT_CHANNELS: email
+          ALERT_TOPIC_ARN: !Ref OpsAlertTopic
       Policies:
         - Statement:
             - Effect: Allow
               Action: [dynamodb:GetItem, dynamodb:PutItem]
               Resource: !GetAtt WatchTable.Arn
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref OpsAlertTopic
             - Effect: Allow
               Action: ssm:GetParameters
               Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/natbag/yemot/*

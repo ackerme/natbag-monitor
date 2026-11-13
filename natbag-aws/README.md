@@ -137,30 +137,36 @@ aws lambda delete-function-concurrency --function-name natbag-proxy
 
 השרת עצמו לא שומר מצב. ימות המשיח שולחת בכל בקשה את כל מה שהמתקשר הקיש עד אותו רגע (flight1, pick1, next1, flight2…).
 
-## התרעה טלפונית (natbag-watcher)
+## התרעות על מטוסים (natbag-watcher)
 
-הפונקציה רצה כל דקה ומתקשרת אליך דרך ימות המשיח בשני מקרים. השיחות עולות **יחידות** בימות המשיח.
+הפונקציה רצה כל דקה ושולחת התרעה בשני מקרים:
 
-- **מטוס בחירום:** מטוס עד 100 ק"מ מנתב"ג משדר קוד חירום (7700 מצב חירום, 7600 תקלת קשר, 7500 התערבות בלתי חוקית, או שדה emergency של ADS-B). מתקשרים אחרי **שתי דגימות רצופות** (בערך 2 דקות), כדי לא להתקשר על קוד שהבהב בטעות. על אותו מטוס מתקשרים לכל היותר פעם ב-3 שעות. בשיחה: מי המטוס, איפה, באיזה גובה ומה הוא עושה.
+- **מטוס בחירום:** מטוס עד 100 ק"מ מנתב"ג משדר קוד חירום (7700 מצב חירום, 7600 תקלת קשר, 7500 התערבות בלתי חוקית, או שדה emergency של ADS-B). ההתרעה נשלחת אחרי **שתי דגימות רצופות** (בערך 2 דקות), כדי לא להתריע על קוד שהבהב בטעות. על אותו מטוס – לכל היותר פעם ב-3 שעות. בהתרעה: מי המטוס, איפה, באיזה גובה, מה הוא עושה, וקישור למפה חיה.
 - **חריגה בתנועה האווירית:** כשמדד החריגה עובר ל"חריגה משמעותית", לכל היותר פעם בחצי שעה.
 
-1. **שמירת הפרטים ב-SSM** (ב-CloudShell; הערכים לא מוצגים על המסך ולא נשמרים בהיסטוריה):
-   ```bash
-   read -rsp "Yemot system number: " V && aws ssm put-parameter --name /natbag/yemot/username --type SecureString --value "$V" --overwrite && unset V; echo
-   read -rsp "Yemot password: " V && aws ssm put-parameter --name /natbag/yemot/password --type SecureString --value "$V" --overwrite && unset V; echo
-   read -rsp "Phone to call: " V && aws ssm put-parameter --name /natbag/yemot/phone --type SecureString --value "$V" --overwrite && unset V; echo
-   ```
-2. **שיחת בדיקה:**
-   ```bash
-   aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
-     --payload '{"testCall":true}' /tmp/out.json && cat /tmp/out.json
-   ```
-   **שיחת בדיקה של התרעת חירום** (מטוס מדומה, ההקראה מתחילה ב"שיחת בדיקה"):
-   ```bash
-   aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
-     --payload '{"testEmergency":true}' /tmp/out.json && cat /tmp/out.json
-   ```
-3. **מעקב:** הלוגים נמצאים ב-`/aws/lambda/natbag-watcher`, והגרף "מדד החריגה" בלוח הבקרה.
+**ערוצים** (משתנה `ALERT_CHANNELS` ב-`template.yaml`):
+
+| ערך | מה נשלח | עלות |
+|---|---|---|
+| `email` (ברירת המחדל) | מייל ל-`AlertEmail`, דרך אותו נושא SNS של התרעות המערכת | בחינם |
+| `email,phone` | גם שיחת טלפון עם הקראה, דרך ימות המשיח | **יחידות** בימות המשיח |
+
+**בדיקה** (מטוס מדומה; המייל מסומן `[TEST]`):
+```bash
+aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
+  --payload '{"testEmergency":true}' /tmp/out.json && cat /tmp/out.json
+```
+תקין: `"ok":true` ו-`"email":{"messageId":...}`. אם המייל לא מגיע – לבדוק שאישרת את המנוי ל-`natbag-ops-alerts` ("Confirm subscription" במייל הראשון מ-AWS).
+
+**שיחות טלפון (לא חובה):** שומרים את פרטי ימות המשיח ב-SSM (הערכים לא מוצגים על המסך ולא נשמרים בהיסטוריה), ומשנים את `ALERT_CHANNELS` ל-`email,phone`:
+```bash
+read -rsp "Yemot system number: " V && aws ssm put-parameter --name /natbag/yemot/username --type SecureString --value "$V" --overwrite && unset V; echo
+read -rsp "Yemot password: " V && aws ssm put-parameter --name /natbag/yemot/password --type SecureString --value "$V" --overwrite && unset V; echo
+read -rsp "Phone to call: " V && aws ssm put-parameter --name /natbag/yemot/phone --type SecureString --value "$V" --overwrite && unset V; echo
+```
+שיחת בדיקה בלבד: `--payload '{"testCall":true}'`.
+
+**מעקב:** הלוגים ב-`/aws/lambda/natbag-watcher`, והמדדים `AirspaceScore` ו-`EmergencyAircraft` ב-CloudWatch (Namespace: Natbag).
 
 ## פריסה אוטומטית מ-GitHub (CI/CD)
 
