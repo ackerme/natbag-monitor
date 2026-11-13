@@ -311,8 +311,12 @@
       if (recentFinals === 0 && baseFinals >= 1.5) {
         score += 3; reasons.push(`אין מטוסים בגישה סופית ב-10 הדקות האחרונות (בדרך כלל ~${baseFinals.toFixed(1)})`);
       }
-      if (baseAir >= 6 && cur.airborne <= baseAir * 0.4) {
-        score += 2; reasons.push(`ירידה חדה במספר המטוסים באוויר (${cur.airborne} לעומת ממוצע ${Math.round(baseAir)})`);
+      // לפי הדגימה הגבוהה ב-3 הדקות האחרונות (ולא רק האחרונה): דגימה בודדת שבה מקור הנתונים החזיר
+      // רק חלק מהמטוסים היא תקלה בנתונים, לא ירידה אמיתית בתנועה. ירידה אמיתית נמשכת בכל הדגימות
+      const last3 = history.filter(h => now - h.t <= 3 * 60e3);
+      const airNow = last3.length >= 2 ? Math.max(...last3.map(h => h.airborne || 0)) : null;
+      if (airNow != null && baseAir >= 6 && airNow <= baseAir * 0.4) {
+        score += 2; reasons.push(`ירידה חדה במספר המטוסים באוויר (${airNow} לעומת ממוצע ${Math.round(baseAir)})`);
       }
     }
     const level = score >= 4 ? 'major' : score >= 2 ? 'unusual' : 'normal';

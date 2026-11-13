@@ -213,3 +213,11 @@ test('yemotCall: Login ואז RunCampaign עם הקראה לטלפון', async (
   const bad = async () => new Response(JSON.stringify({ responseStatus: 'ERROR', message: 'not enough units' }));
   await assert.rejects(yemotCall({ username: 'a', password: 'b', phone: 'c' }, 'x', bad), /not enough units/);
 });
+
+test('ירידה במספר המטוסים: דגימה בודדת עם נתונים חסרים לא נחשבת (מה שקרה ב-11:26 וב-15:02)', () => {
+  const base = Array.from({ length: 15 }, (_, i) => ({ t: NOW - (60 - i * 3) * 60e3, airborne: 6, finals: 1 }));
+  const glitch = [...base, { t: NOW - 2 * 60e3, airborne: 6 }, { t: NOW - 60e3, airborne: 6 }, { t: NOW, airborne: 2 }];
+  assert.ok(!DD.airspaceStatus(glitch, NOW).reasons.some(r => r.includes('ירידה חדה במספר')), 'דקה אחת של 2 מטוסים – תקלה');
+  const real = [...base, { t: NOW - 2 * 60e3, airborne: 2 }, { t: NOW - 60e3, airborne: 1 }, { t: NOW, airborne: 2 }];
+  assert.ok(DD.airspaceStatus(real, NOW).reasons.some(r => r.includes('ירידה חדה במספר')), '3 דקות רצופות – ירידה אמיתית');
+});
