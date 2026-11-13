@@ -24,7 +24,7 @@ exports.handler = async (event) => {
     return { disabled: false };
   }
 
-  // כל הפונקציות שעולות כסף: שרת הביניים, ושלוחה 5 (natbag-atc)
+  // כל הפונקציות שעולות כסף: שרת הביניים, שלוחה 5 (natbag-atc) וסוכן ה-AI (natbag-investigator)
   const targets = (process.env.TARGET_FUNCTIONS || target || "").split(",").map(s => s.trim()).filter(Boolean);
   const { LambdaClient, PutFunctionConcurrencyCommand } = require("@aws-sdk/client-lambda");
   const lambda = new LambdaClient({});
