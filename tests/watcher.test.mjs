@@ -106,11 +106,65 @@ test('watcher step: שגרה → normal; קוד חירום + נחיתות שנע
 
   // היסטוריה: בשעה האחרונה היו בממוצע 2 מטוסים בגישה סופית
   const base = Array.from({ length: 15 }, (_, i) => ({ t: NOW - (60 - i * 3) * 60e3, airborne: 10, finals: 2, holding: 0, turnBacks: 0, emergencies: 0 }));
-  r = step({ ...emptyState(), history: base }, [pax('738001', { squawk: '7700' }), ...Array.from({ length: 9 }, (_, i) => pax('73810' + i))], NOW);
-  assert.equal(r.status.level, 'major');
+  const acNow = [pax('738001', { squawk: '7700' }), ...Array.from({ length: 9 }, (_, i) => pax('73810' + i))];
+  r = step({ ...emptyState(), history: base }, acNow, NOW);
+  assert.equal(r.status.rawLevel, 'major', 'הדגימה עצמה – משמעותית');
+  assert.equal(r.status.level, 'normal', 'אבל עוד לא 3 דקות ברצף – לא מדווחים');
   assert.ok(r.status.reasons.some(x => x.includes('קוד חירום')));
   assert.ok(r.status.reasons.some(x => x.includes('גישה סופית')));
-  assert.ok(r.state.history.every(h => NOW - h.t <= 60 * 60e3));
+  // אותו מצב נמשך – אחרי 3 דקות הרמה היציבה עולה ל-major
+  let s = r.state;
+  for (let m = 1; m <= 3; m++) { r = step(s, acNow, NOW + m * 60e3); s = { ...r.state, lastLevel: r.status.level }; }
+  assert.equal(r.status.level, 'major');
+  assert.ok(r.state.history.every(h => NOW + 3 * 60e3 - h.t <= 60 * 60e3));
+});
+
+// ───────── מדד יציב: בלי קפיצות של דקה ─────────
+import { createRequire } from 'node:module';
+const DD = createRequire(import.meta.url)('../detect.js');
+const H = (min, raw) => ({ t: NOW + min * 60e3, raw });
+
+test('stableLevel: קפיצה של דקה אחת לא נספרת (זה מה שקרה ב-15:02 / 11:26 / 11:02)', () => {
+  const h = [H(0, 0), H(1, 0), H(2, 1), H(3, 0), H(4, 0)];
+  for (let i = 0; i < h.length; i++) assert.equal(DD.stableLevel(h.slice(0, i + 1), 'normal', h[i].t), 'normal');
+});
+
+test('stableLevel: נכנסים אחרי 3 דקות רצופות, יוצאים רק אחרי 5 דקות רגועות', () => {
+  const h = [H(0, 0), H(1, 1), H(2, 1), H(3, 1), H(4, 1)];
+  assert.equal(DD.stableLevel(h.slice(0, 3), 'normal', NOW + 2 * 60e3), 'normal', 'שתי דקות – עוד לא');
+  assert.equal(DD.stableLevel(h.slice(0, 5), 'normal', NOW + 4 * 60e3), 'unusual', '3 דקות ברצף – חריגה');
+  // יורד לשגרה לדקה ומיד חוזר – נשארים בחריגה (בלי "חזר לשגרה" מזויף)
+  const h2 = [...h, H(5, 0), H(6, 1), H(7, 0)];
+  assert.equal(DD.stableLevel(h2, 'unusual', NOW + 7 * 60e3), 'unusual');
+  // 5 דקות רגועות – חוזרים לשגרה
+  const h3 = [...h, H(5, 0), H(6, 0), H(7, 0), H(8, 0), H(9, 0), H(10, 0)];
+  assert.equal(DD.stableLevel(h3, 'unusual', NOW + 10 * 60e3), 'normal');
+});
+
+test('airspaceSample: מטוס שהמריא והתיישר לרגע כבר לא נספר "הסתובב"', () => {
+  const mem = { trails: {}, approachSeen: {}, finalSeen: {}, lastDist: {} };
+  const dep = (o) => ({ icao24: 'd1', cls: 'passenger', onGround: false, isFinal: false, ...o });
+  // מתיישר: נראה "בגישה" לפי הגובה, אבל לא יורד ולא טס לשדה
+  DD.airspaceSample([dep({ isApproach: true, vrate: 0, dev: 170, dist: 15, alt: 1800 })], mem, NOW);
+  const s = DD.airspaceSample([dep({ isApproach: false, isDeparting: true, vrate: 8, dev: 170, dist: 18, alt: 2200 })], mem, NOW + 60e3);
+  assert.equal(s.turnBacks, 0);
+  // מטוס שבאמת היה בגישה (יורד, לכיוון השדה) והסתובב – כן נספר
+  const arr = (o) => ({ icao24: 'a1', cls: 'passenger', onGround: false, isFinal: false, ...o });
+  DD.airspaceSample([arr({ isApproach: true, vrate: -4, dev: 10, dist: 30, alt: 2000 })], mem, NOW);
+  const s2 = DD.airspaceSample([arr({ isApproach: false, vrate: 0, dev: 170, dist: 31, alt: 2000 })], mem, NOW + 60e3);
+  assert.equal(s2.turnBacks, 1);
+});
+
+test('airspaceSample: גישה מוחמצת וירידה חדה', () => {
+  const mem = { trails: {}, approachSeen: {}, finalSeen: {}, lastDist: {} };
+  const p = (o) => ({ icao24: 'g1', cls: 'passenger', onGround: false, isApproach: false, dev: 0, dist: 5, ...o });
+  DD.airspaceSample([p({ isFinal: true, vrate: -4, alt: 300 })], mem, NOW);
+  const s = DD.airspaceSample([p({ isFinal: false, vrate: 10, alt: 600 })], mem, NOW + 60e3);
+  assert.equal(s.goArounds, 1);
+  const st = DD.airspaceStatus([{ t: NOW, ...s }], NOW + 60e3);
+  assert.ok(st.reasons.some(r => r.includes('גישה מוחמצת')));
+  const d = DD.airspaceSample([{ icao24: 's1', cls: 'passenger', onGround: false, vrate: -30, alt: 1500, dist: 20 }], mem, NOW);
+  assert.equal(d.steep, 1);
 });
 
 test('watcher step: שובלים נשמרים בין הרצות ונמחקים אחרי 10 דקות', () => {

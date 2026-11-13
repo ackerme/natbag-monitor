@@ -72,6 +72,7 @@ h2{font-size:1.3rem;font-weight:700;margin-bottom:14px}
 .events li{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--rule)}
 .events time{font-family:var(--mono);color:var(--dim)}
 .events .unusual{color:var(--amber)} .events .major{color:var(--alarm)} .events .normal{color:var(--good)}
+.events .why{display:block;color:var(--dim);font-size:.85rem;margin-top:2px}
 .empty{color:var(--dim);padding:14px 0}
 
 .state{display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:700;margin-top:6px}
@@ -215,7 +216,7 @@ function render(s) {
       `<div class="row"><span>${esc(a.name)}</span><div class="track"><div class="fill" style="width:${a.count / max * 100}%"></div></div><span class="n">${a.count}</span></div>`).join('')
       : '<p class="empty">עוד אין נתונים להיום.</p>';
     const lab = { normal: 'חזר לשגרה', unusual: 'חריגה', major: 'חריגה משמעותית' };
-    $('events').innerHTML = t.events.length ? t.events.slice().reverse().map(e => `<li><time>${hhmm(e.t)}</time><span class="${esc(e.level)}">${lab[e.level] || esc(e.level)}</span></li>`).join('')
+    $('events').innerHTML = t.events.length ? t.events.slice().reverse().map(e => `<li><time>${hhmm(e.t)}</time><span class="${esc(e.level)}">${lab[e.level] || esc(e.level)}${e.reasons && e.reasons.length ? `<small class="why">${e.reasons.map(esc).join(' · ')}</small>` : ''}</span></li>`).join('')
       : '<li class="empty">לא היו חריגות היום.</li>';
   } else {
     $('todayCards').innerHTML = '<div class="wide"><span>הנתונים של היום מתחילים להיאסף. בעוד כמה דקות יופיעו כאן.</span></div>';

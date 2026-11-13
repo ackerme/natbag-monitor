@@ -219,6 +219,62 @@
            prevDist != null && dist > prevDist + 0.5;
   }
 
+  // "היה בגישה" לצורך זיהוי הסתובבות: יורד וטס לכיוון השדה. בלי התנאי הזה, מטוס שהמריא ו"התיישר" לרגע
+  // בגובה נמוך נחשב בגישה – וכשהמשיך לטפס ולהתרחק נספר בטעות כ"הסתובב"
+  const approachMark = p => !!p.isApproach && p.vrate != null && p.vrate < -1 && p.dev != null && p.dev <= 45;
+
+  /**
+   * דגימה אחת של המרחב האווירי – אותו חישוב בדף ובשרת.
+   * planes: מטוסים מסווגים (classify) · mem: { trails, approachSeen, finalSeen, lastDist } נשמר בין דגימות
+   * מסמן על כל מטוס isHolding / isTurnBack / isGoAround / isSteepDescent, ומחזיר את הספירה (מטוסי נוסעים בלבד)
+   */
+  function airspaceSample(planes, mem, now) {
+    let holding = 0, turnBacks = 0, goArounds = 0, steep = 0, emergencies = 0;
+    for (const p of planes) {
+      const id = p.icao24;
+      p.isHolding = !p.onGround && isHolding(mem.trails[id]);
+      if (approachMark(p)) mem.approachSeen[id] = now;
+      p.isTurnBack = isTurnBack({
+        wasApproaching: mem.approachSeen[id] && now - mem.approachSeen[id] <= 10 * 60e3,
+        onGround: p.onGround, isApproach: p.isApproach, dev: p.dev, prevDist: mem.lastDist[id], dist: p.dist });
+      // גישה מוחמצת (go-around): היה בגישה סופית ב-5 הדקות האחרונות, ועכשיו מטפס בגובה נמוך במקום לנחות
+      p.isGoAround = !!mem.finalSeen[id] && now - mem.finalSeen[id] <= 5 * 60e3 && !p.onGround && !p.isFinal &&
+                     p.vrate != null && p.vrate > 3 && p.alt != null && p.alt < 2500;
+      if (p.isFinal) mem.finalSeen[id] = now;
+      // ירידה חדה מאוד (מעל ~5000 רגל לדקה) בגובה נמוך – לא דבר שקורה בגישה רגילה
+      p.isSteepDescent = !p.onGround && p.alt != null && p.alt < 3000 && p.vrate != null && p.vrate < -25;
+      mem.lastDist[id] = p.dist;
+      if (p.cls !== 'passenger') continue;
+      if (p.isHolding) holding++;
+      if (p.isTurnBack) turnBacks++;
+      if (p.isGoAround) goArounds++;
+      if (p.isSteepDescent) steep++;
+      if (p.squawk === '7700' || p.squawk === '7600') emergencies++;
+    }
+    const pax = planes.filter(p => p.cls === 'passenger');
+    return { t: now, airborne: pax.filter(p => !p.onGround).length, finals: pax.filter(p => p.isFinal).length,
+             holding, turnBacks, goArounds, steep, emergencies };
+  }
+
+  /**
+   * רמה "יציבה" – בלי קפיצות של דקה. נכנסים לרמה רק אם היא נמשכת 3 דקות ברצף,
+   * ויוצאים ממנה רק אחרי 5 דקות רצופות מתחתיה (hysteresis, כמו "for: 5m" ב-Prometheus).
+   * history[i].raw = 0/1/2 (normal/unusual/major) של כל דגימה; prevLevel = הרמה היציבה הקודמת
+   */
+  const RANK = { normal: 0, unusual: 1, major: 2 }, LEVELS = ['normal', 'unusual', 'major'];
+  const ENTER_MS = 3 * 60e3, EXIT_MS = 5 * 60e3;
+  function stableLevel(history, prevLevel, now) {
+    const prev = RANK[prevLevel] ?? 0;
+    const win = ms => (history || []).filter(h => h.raw != null && now - h.t <= ms);
+    const spans = (arr, ms) => arr.length >= 2 && now - arr[0].t >= ms * 0.66;   // הדגימות מכסות את רוב החלון
+    const e = win(ENTER_MS);
+    const enter = spans(e, ENTER_MS) ? Math.min(...e.map(h => h.raw)) : 0;
+    if (enter > prev) return LEVELS[enter];
+    const x = win(EXIT_MS);
+    if (prev > 0 && spans(x, EXIT_MS) && x.every(h => h.raw < prev)) return LEVELS[Math.max(...x.map(h => h.raw))];
+    return LEVELS[prev];
+  }
+
   /**
    * history: [{ t, airborne, finals, holding, turnBacks, emergencies }] – דגימה אחת בכל רענון
    * מחזיר { level: 'normal'|'unusual'|'major', score, reasons[], baselineReady, collectedMin }
@@ -243,6 +299,12 @@
 
     if (cur.emergencies >= 1) { score += 2; reasons.push('מטוס משדר קוד חירום (7700/7600)'); }
 
+    const goArounds = Math.max(0, ...recent.map(h => h.goArounds || 0));
+    if (goArounds >= 2) { score += 2; reasons.push(`${goArounds} מטוסים ביצעו גישה מוחמצת – עלו שוב במקום לנחות`); }
+    else if (goArounds === 1) { score += 1; reasons.push('מטוס ביצע גישה מוחמצת – עלה שוב במקום לנחות'); }
+
+    if (cur.steep >= 1) { score += 1; reasons.push(`${cur.steep === 1 ? 'מטוס' : cur.steep + ' מטוסים'} בירידה חדה מאוד בגובה נמוך`); }
+
     if (baselineReady) {
       const baseFinals = avg(base, 'finals'), baseAir = avg(base, 'airborne');
       const recentFinals = Math.max(...recent.map(h => h.finals || 0));
@@ -257,7 +319,8 @@
     return { level, score, reasons, baselineReady, collectedMin };
   }
 
-  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, airspaceStatus, aircraftClass, tankerStatus, countryOf, trackedStatus };
+  const api = { haversine, bearingTo, angDiff, normalize, updateTrend, classify, isHolding, isTurnBack, approachMark, airspaceSample, stableLevel,
+                airspaceStatus, aircraftClass, tankerStatus, countryOf, trackedStatus, RANK };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NatbagDetect = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -16,7 +16,7 @@ const RADIUS_KM = 80, DEV_THRESH = 18, FINAL_KM = 25, FINAL_ALT = 1800;
 const TRAIL_MS = 10 * 60e3, HISTORY_MS = 60 * 60e3, APPROACH_MS = 10 * 60e3;
 export const CALL_GAP_MS = 30 * 60e3;
 
-export const emptyState = () => ({ history: [], trails: {}, approachSeen: {}, lastDist: {}, planeHist: {}, emergency: {}, lastLevel: "normal", lastCallAt: 0 });
+export const emptyState = () => ({ history: [], trails: {}, approachSeen: {}, finalSeen: {}, lastDist: {}, planeHist: {}, emergency: {}, lastLevel: "normal", lastCallAt: 0 });
 
 /**
  * צעד אחד: רשימת ADS-B → מצב חדש + סטטוס המדד. פונקציה טהורה (בלי רשת), כדי שאפשר לבדוק אותה.
@@ -46,28 +46,18 @@ export function step(prev, acList, now) {
     if (!tr.length || now - tr[tr.length - 1].t > TRAIL_MS) delete st.trails[id];
   }
 
-  // אותו חישוב כמו updateAirspace בדף
-  let holding = 0, turnBacks = 0, emergencies = 0;
-  for (const p of planes) {
-    const isHolding = !p.onGround && D.isHolding(st.trails[p.icao24]);
-    if (p.isApproach) st.approachSeen[p.icao24] = now;
-    const isTurnBack = D.isTurnBack({
-      wasApproaching: st.approachSeen[p.icao24] && now - st.approachSeen[p.icao24] <= APPROACH_MS,
-      onGround: p.onGround, isApproach: p.isApproach, dev: p.dev, prevDist: st.lastDist[p.icao24], dist: p.dist });
-    st.lastDist[p.icao24] = p.dist;
-    if (p.cls !== "passenger") continue;
-    if (isHolding) holding++;
-    if (isTurnBack) turnBacks++;
-    if (p.squawk === "7700" || p.squawk === "7600") emergencies++;
-  }
+  // אותה דגימה בדיוק כמו בדף (detect.js): המתנה, הסתובבות, גישה מוחמצת, ירידה חדה, קוד חירום
+  const sample = D.airspaceSample(planes, st, now);
   // ניקוי מטוסים שכבר לא נראו (שלא יגדל לנצח)
   const seen = new Set(planes.map(p => p.icao24));
-  for (const m of [st.approachSeen, st.lastDist, st.planeHist]) for (const id of Object.keys(m)) if (!seen.has(id) && !st.trails[id]) delete m[id];
+  for (const m of [st.approachSeen, st.finalSeen, st.lastDist, st.planeHist]) for (const id of Object.keys(m)) if (!seen.has(id) && !st.trails[id]) delete m[id];
 
-  const pax = planes.filter(p => p.cls === "passenger");
-  st.history = [...st.history, { t: now, airborne: pax.filter(p => !p.onGround).length, finals: pax.filter(p => p.isFinal).length, holding, turnBacks, emergencies }]
-    .filter(h => now - h.t <= HISTORY_MS);
-  const status = D.airspaceStatus(st.history, now);
+  st.history = [...st.history, sample].filter(h => now - h.t <= HISTORY_MS);
+  const raw = D.airspaceStatus(st.history, now);
+  st.history[st.history.length - 1].raw = D.RANK[raw.level];
+  // הרמה שמדווחים עליה (סטטיסטיקה, מייל) – יציבה: נכנסת אחרי 3 דקות, יוצאת אחרי 5
+  const level = D.stableLevel(st.history, st.lastLevel, now);
+  const status = { ...raw, rawLevel: raw.level, level };
   return { state: st, status, planes };
 }
 
@@ -99,7 +89,7 @@ export function recordStats(prevDay, planes, status, now) {
   a.s += airborne; a.n += 1; a.m = Math.max(a.m, airborne);
   if (status.level !== "normal") day.levelMin[status.level] = (day.levelMin[status.level] || 0) + 1;
   if (status.level !== day.lastLevel) {
-    day.events.push({ t: now, level: status.level });
+    day.events.push({ t: now, level: status.level, ...(status.level !== "normal" ? { reasons: (status.reasons || []).slice(0, 3) } : {}) });
     if (day.events.length > 40) day.events.shift();
     day.lastLevel = status.level;
   }
@@ -254,7 +244,7 @@ export const handler = async (event = {}) => {
   // EmergencyAircraft: כמה מטוסים משדרים קוד חירום ברגע זה (לגרף ולאזעקה ב-CloudWatch)
   log({ _aws: { Timestamp: now, CloudWatchMetrics: [{ Namespace: "Natbag", Dimensions: [[]],
           Metrics: [{ Name: "AirspaceScore", Unit: "Count" }, { Name: "EmergencyAircraft", Unit: "Count" }] }] },
-        AirspaceScore: status.score, EmergencyAircraft: emerg.length, level: status.level, reasons: status.reasons,
+        AirspaceScore: status.score, EmergencyAircraft: emerg.length, level: status.level, rawLevel: status.rawLevel, reasons: status.reasons,
         baselineReady: status.baselineReady, call,
         emergency: emerg.map(e => ({ id: e.id, cs: String(e.a.flight || "").trim(), code: e.code })), emergencyAlert });
   return { level: status.level, score: status.score, call, emergencyAlert, emergencies: emerg.length };
