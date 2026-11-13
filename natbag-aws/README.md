@@ -139,7 +139,10 @@ aws lambda delete-function-concurrency --function-name natbag-proxy
 
 ## התרעה טלפונית (natbag-watcher)
 
-הפונקציה רצה כל דקה. כשמדד החריגה עובר ל"חריגה משמעותית", היא מתקשרת אליך דרך ימות המשיח, לכל היותר פעם בחצי שעה. השיחות עולות **יחידות** בימות המשיח.
+הפונקציה רצה כל דקה ומתקשרת אליך דרך ימות המשיח בשני מקרים. השיחות עולות **יחידות** בימות המשיח.
+
+- **מטוס בחירום:** מטוס עד 100 ק"מ מנתב"ג משדר קוד חירום (7700 מצב חירום, 7600 תקלת קשר, 7500 התערבות בלתי חוקית, או שדה emergency של ADS-B). מתקשרים אחרי **שתי דגימות רצופות** (בערך 2 דקות), כדי לא להתקשר על קוד שהבהב בטעות. על אותו מטוס מתקשרים לכל היותר פעם ב-3 שעות. בשיחה: מי המטוס, איפה, באיזה גובה ומה הוא עושה.
+- **חריגה בתנועה האווירית:** כשמדד החריגה עובר ל"חריגה משמעותית", לכל היותר פעם בחצי שעה.
 
 1. **שמירת הפרטים ב-SSM** (ב-CloudShell; הערכים לא מוצגים על המסך ולא נשמרים בהיסטוריה):
    ```bash
@@ -151,6 +154,11 @@ aws lambda delete-function-concurrency --function-name natbag-proxy
    ```bash
    aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
      --payload '{"testCall":true}' /tmp/out.json && cat /tmp/out.json
+   ```
+   **שיחת בדיקה של התרעת חירום** (מטוס מדומה, ההקראה מתחילה ב"שיחת בדיקה"):
+   ```bash
+   aws lambda invoke --function-name natbag-watcher --cli-binary-format raw-in-base64-out \
+     --payload '{"testEmergency":true}' /tmp/out.json && cat /tmp/out.json
    ```
 3. **מעקב:** הלוגים נמצאים ב-`/aws/lambda/natbag-watcher`, והגרף "מדד החריגה" בלוח הבקרה.
 

@@ -303,6 +303,44 @@ test('מאיפה / לאן: אות קריאה ↔ טיסה בלוח (ELY027 = LY 
   assert.equal(F.routeFor(null, 'ISR580', 'arr'), null);
 });
 
+test('דיוק: גישת ביניים בגובה קבוע נחשבת נחיתה; GPS כשאין קצב לפי לחץ', () => {
+  const C = F.classifyMove;
+  assert.equal(C({ dist: 35, altM: 1500, rate: 0, track: 120, brg: 300 }), 'arr');        // ישר, בגובה קבוע, לכיוון השדה
+  assert.equal(C({ dist: 35, altM: 1500, rate: 0, track: 300, brg: 300 }), null);         // אותו דבר אבל מתרחק – לא נחיתה
+  const [p] = F.planesNear([{ flight: 'ELY5', lat: 31.9, lon: 34.7, alt_baro: 3000, geom_rate: -900, track: 55, gs: 250 }]);
+  assert.equal(p.rate, -900, 'geom_rate במקום baro_rate');
+  assert.equal(p.move, 'arr');
+});
+
+test('דיוק: זמן נחיתה לפי הרדאר מתחשב בהאטה לקראת הנחיתה', () => {
+  assert.equal(F.radarEta(50, 500), 11);       // 50 ק"מ, 500 קמ"ש → ממוצע 380 קמ"ש + 3 דקות לסיבוב
+  assert.equal(F.radarEta(10, 300), 3);        // קרוב: 260 קמ"ש (10 ק"מ ≈ 2.3 דקות) + דקה
+  assert.equal(F.radarEta(50, 50), null);      // מהירות לא הגיונית – לא מנחשים
+});
+
+test('דיוק: עיר מוצא/יעד רק אם הזמן בלוח מתאים (לא טיסה של יום אחר), ולא טיסה שבוטלה', () => {
+  const idx = F.routeIndex(BOARD, nowIl);
+  assert.equal(F.routeFor(idx, 'ISR580', 'arr', nowIl).city, 'זאגרב');                  // נוחתת ב-14:25, עכשיו 14:00
+  assert.equal(F.routeFor(idx, 'ISR580', 'arr', nowIl + 5 * 36e5), null, 'חמש שעות אחרי – כבר לא אותה טיסה');
+  assert.equal(F.routeFor(idx, 'ISR580', 'arr', nowIl + 3 * 36e5), null, 'שעתיים אחרי הנחיתה בלוח – לא');
+  assert.equal(F.routeFor(idx, 'RYR777', 'arr', nowIl), null, 'טיסה שבוטלה לא נותנת עיר');
+});
+
+test('דיוק: מטוס שהרדאר לא סיווג – הלוח משלים (נכנס לנחיתות) וזמן הנחיתה לפי הלוח', () => {
+  const idx = F.routeIndex(BOARD, nowIl);
+  // ISR580 במרחק ~50 ק"מ, בגובה קבוע, לא טס ישירות לשדה – הרדאר לבד לא יודע
+  const [p] = F.planesNear([{ flight: 'ISR580', lat: 32.35, lon: 35.25, alt_baro: 16000, baro_rate: 0, track: 0, gs: 270 }]);
+  assert.equal(p.move, null);
+  F.enrichFromBoard(p, idx, nowIl);
+  assert.equal(p.move, 'arr');
+  assert.equal(p.phase, 'בגישה לנחיתה בנמל התעופה');
+  assert.equal(p.route.city, 'זאגרב');
+  assert.equal(p.eta, 25, 'לפי השעה המעודכנת בלוח (14:25)');
+  // מטוס קל/מסוק לא נכנס לרשימות גם אם יש לו אות קריאה
+  const [h] = F.planesNear([{ flight: 'ISR580', lat: 32.35, lon: 35.25, alt_baro: 3000, category: 'A7' }]);
+  assert.equal(F.enrichFromBoard(h, idx, nowIl).move, null);
+});
+
 test('נחיתות בלי לוח הטיסות: ההקראה ממשיכה, רק בלי העיר', async () => {
   const t = texts(await F.handleIvr({ mode: 'arrivals' }, { ...pdeps, getBoard: async () => { throw new Error('down'); } }));
   assert.match(t[1], /^מספר 1 אל על טיסה 27 בואינג 787 במרחק/);

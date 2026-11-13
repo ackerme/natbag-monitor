@@ -221,11 +221,31 @@ export function classifyMove({ dist, altM, rate = 0, track = null, brg }) {
   // נחיתה
   if (dist <= 40 && altM <= 2500 && rate <= -200) return 'arr';                       // גישה סופית/קרובה: נמוך ויורד ליד השדה
   if (dist <= 25 && altM <= 1200 && rate <= 100 && toward) return 'arr';              // נמוך מאוד, ישר ולכיוון המסלול
+  if (dist <= 45 && altM <= 2500 && rate <= 300 && toward) return 'arr';              // גישת ביניים: טס ישר בגובה קבוע לפני הירידה הסופית
   if (dist <= 120 && altM <= 7000 && rate <= -500 && toward) return 'arr';            // בירידה מרחוק לכיוון השדה
   // המראה
   if (dist <= 40 && altM <= 3000 && rate >= 300) return 'dep';                        // מטפס נמוך ליד השדה
   if (dist <= 120 && altM <= 9000 && rate >= 800 && away) return 'dep';               // מטפס ומתרחק
   return null;
+}
+
+// מה המטוס עושה – אותו סיווג כמו בשלוחות הנחיתות וההמראות
+export function phaseOf(move, altM, rate = 0) {
+  return move === 'arr' ? 'בגישה לנחיתה בנמל התעופה'
+       : move === 'dep' ? 'אחרי המראה מנמל התעופה'
+       : altM != null && altM >= 7000 ? 'חולף באזור בגובה שיוט'
+       : rate < -300 ? 'בירידה' : rate > 300 ? 'בטיפוס' : 'בטיסה באזור';
+}
+
+/**
+ * זמן משוער לנחיתה לפי הרדאר (דקות). המטוס מאט לקראת הנחיתה (~260 קמ"ש בגישה הסופית),
+ * אז מחשבים לפי ממוצע של המהירות הנוכחית והמהירות בגישה, ומוסיפים זמן לסיבוב אל המסלול.
+ */
+const APPROACH_KMH = 260;
+export function radarEta(dist, kmh) {
+  if (!(kmh > 100) || dist == null) return null;
+  const avg = dist > 15 ? (kmh + APPROACH_KMH) / 2 : Math.min(kmh, APPROACH_KMH);
+  return Math.max(1, Math.round(dist / avg * 60 + (dist < 15 ? 1 : 3)));
 }
 
 export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
@@ -236,7 +256,8 @@ export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
       const cs = String(a.flight || '').trim().toUpperCase();
       const m = /^([A-Z]{3})(\d+)[0-9A-Z]{0,3}$/.exec(cs);   // QTR8AB, SVA38H, ELY027
       const altM = typeof a.alt_baro === 'number' ? Math.round(a.alt_baro * 0.3048 / 100) * 100 : null;
-      const rate = typeof a.baro_rate === 'number' ? a.baro_rate : 0;
+      // קצב טיפוס/ירידה: לפי הלחץ, ואם אין – לפי ה-GPS (חלק מהמטוסים משדרים רק אחד מהם)
+      const rate = typeof a.baro_rate === 'number' ? a.baro_rate : typeof a.geom_rate === 'number' ? a.geom_rate : 0;
       const kind = a.category === 'A7' ? 'מסוק' : (a.category === 'A1' || a.category === 'A2') ? 'מטוס קל'
                  : (a.dbFlags & 1) ? 'כלי טיס צבאי' : null;
       let name;
@@ -250,13 +271,8 @@ export function planesNear(acList, radiusKm = PLANES_RADIUS_KM) {
       const kmh = typeof a.gs === 'number' ? a.gs * 1.852 : null;
       // נוחת / ממריא – רק לפי הרדאר (ADS-B), בלי לוח הטיסות. מסוקים, מטוסים קלים וצבאיים לא נספרים
       const move = kind ? null : classifyMove({ dist, altM, rate, track: typeof a.track === 'number' ? a.track : null, brg });
-      const eta = move === 'arr' && kmh > 100 ? Math.max(1, Math.round(dist / kmh * 60 + (dist < 15 ? 1 : 3))) : null;   // + זמן לגישה הסופית
-      // מה המטוס עושה – אותו סיווג כמו בשלוחות הנחיתות וההמראות
-      const phase = move === 'arr' ? 'בגישה לנחיתה בנמל התעופה'
-                  : move === 'dep' ? 'אחרי המראה מנמל התעופה'
-                  : altM != null && altM >= 7000 ? 'חולף באזור בגובה שיוט'
-                  : rate < -300 ? 'בירידה' : rate > 300 ? 'בטיפוס' : 'בטיסה באזור';
-      return { name, model, dist, dir: dirName(brg), altM, phase, move, eta, cs };
+      const eta = move === 'arr' ? radarEta(dist, kmh) : null;
+      return { name, model, dist, dir: dirName(brg), altM, rate, kmh, kind, move, eta, cs, phase: phaseOf(move, altM, rate) };
     })
     .filter(p => p.dist <= radiusKm)
     .sort((a, b) => a.dist - b.dist);
@@ -268,6 +284,7 @@ export function routeIndex(board, nowIl) {
   const idx = {};
   for (const f of board || []) {
     if (!f.icao || !f.cityHe || (f.dir !== 'A' && f.dir !== 'D')) continue;
+    if (/CANCEL|מבוטל/.test(f.statusEn + f.statusHe)) continue;     // טיסה שבוטלה – לא המטוס שבאוויר
     const t = localMs(f.est || f.sched);
     if (!isNaN(t) && (t < nowIl - 8 * 36e5 || t > nowIl + 12 * 36e5)) continue;
     for (const cs of callsignCandidates(f)) {
@@ -278,12 +295,42 @@ export function routeIndex(board, nowIl) {
   }
   return idx;
 }
+// חלון זמן הגיוני מול הלוח: מטוס באוויר ליד נתב"ג שנוחת – הנחיתה בלוח בין 45 דקות אחורה ל-2 שעות קדימה;
+// מטוס שהמריא – ההמראה בלוח בין שעתיים אחורה לחצי שעה קדימה. מחוץ לחלון – זו כנראה טיסה של יום אחר
+// עם אותו מספר, והעיר הייתה שגויה.
+const ARR_WINDOW = [-45, 120], DEP_WINDOW = [-120, 30];
+const inWindow = (r, nowIl, [from, to]) =>
+  !r || nowIl == null || r.t == null || isNaN(r.t) ? !!r : (r.t - nowIl) / 6e4 >= from && (r.t - nowIl) / 6e4 <= to;
+
 // העיר של מטוס: קודם לפי מה שהרדאר זיהה (נוחת → מאיפה, ממריא → לאן), אחרת מה שיש בלוח
-export function routeFor(idx, cs, move) {
+export function routeFor(idx, cs, move, nowIl) {
   if (!idx || !cs) return null;
   const k = String(cs).trim().toUpperCase();
   const a = idx[`${k}|A`], d = idx[`${k}|D`];
-  return move === 'dep' ? (d || null) : move === 'arr' ? (a || null) : (a || d || null);
+  const aOk = inWindow(a, nowIl, ARR_WINDOW) ? a : null, dOk = inWindow(d, nowIl, DEP_WINDOW) ? d : null;
+  return move === 'dep' ? dOk : move === 'arr' ? aOk : (aOk || dOk || null);
+}
+
+/**
+ * הלוח עוזר לרדאר (בשלוחות הנחיתות וההמראות):
+ *  • מטוס שהרדאר לא בטוח לגביו, אבל לפי הלוח הוא נוחת/ממריא עכשיו בנתב"ג – נכנס לרשימה (מטוסים שהיו "חסרים")
+ *  • זמן הנחיתה: כשהמטוס עוד רחוק – לפי השעה המעודכנת בלוח, אם היא הגיונית מול המרחק והמהירות
+ */
+export function enrichFromBoard(p, idx, nowIl) {
+  if (!idx || !p.cs) { p.route = null; return p; }
+  if (!p.move && !p.kind && p.altM != null && p.dist <= 100) {
+    const a = routeFor(idx, p.cs, 'arr', nowIl), d = routeFor(idx, p.cs, 'dep', nowIl);
+    if (a && !d && p.altM <= 8000 && p.rate <= 300) p.move = 'arr';
+    else if (d && !a && p.altM <= 9000 && p.rate >= -300) p.move = 'dep';
+    if (p.move) { p.phase = phaseOf(p.move, p.altM, p.rate); if (p.move === 'arr') p.eta = radarEta(p.dist, p.kmh); }
+  }
+  p.route = routeFor(idx, p.cs, p.move, nowIl);
+  if (p.move === 'arr' && p.route && p.dist > 25 && nowIl != null && !isNaN(p.route.t)) {
+    const boardEta = Math.round((p.route.t - nowIl) / 6e4);
+    const minEta = p.kmh > 100 ? p.dist / p.kmh * 60 : 0;          // יותר מהר מזה פיזית אי אפשר
+    if (boardEta >= Math.max(1, minEta) && boardEta <= (p.eta ?? minEta) + 40) p.eta = boardEta;
+  }
+  return p;
 }
 const fromTo = r => (r ? ` ${r.dir === 'A' ? 'מ' : 'ל'}${/^[A-Za-z0-9]/.test(r.city) ? '-' : ''}${r.city}` : '');
 
@@ -328,7 +375,7 @@ export async function buildList(kind, deps, nowIl) {
   if (live && live.length) {
     let idx = null;
     try { idx = routeIndex(await deps.getBoard(), nowIl); } catch (e) { deps.onError?.('board', e); }
-    for (const p of live) p.route = routeFor(idx, p.cs, p.move);
+    for (const p of live) enrichFromBoard(p, idx, nowIl);
   }
   if (kind === 'all') {
     if (!live) return null;

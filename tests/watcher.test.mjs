@@ -2,7 +2,65 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { step, shouldCall, callText, yemotCall, emptyState, CALL_GAP_MS } from '../natbag-aws/src/watcher/index.mjs';
+import { step, shouldCall, callText, yemotCall, emptyState, CALL_GAP_MS, sayClean } from '../natbag-aws/src/watcher/index.mjs';
+import { emergencyOf, emergencies, emergencyStep, emergencyText, RECALL_MS } from '../natbag-aws/src/watcher/emergency.mjs';
+
+test('watcher: flights.mjs זהה לזה של השרת (אותו ניסוח כמו בקו)', () => {
+  const a = readFileSync(new URL('../natbag-aws/src/proxy/flights.mjs', import.meta.url), 'utf8');
+  const b = readFileSync(new URL('../natbag-aws/src/watcher/flights.mjs', import.meta.url), 'utf8');
+  assert.equal(b, a, 'הרץ: cp natbag-aws/src/proxy/flights.mjs natbag-aws/src/watcher/flights.mjs');
+});
+
+// ───────── מטוס בחירום ─────────
+const T0 = Date.UTC(2026, 10, 13, 10, 0, 0);
+const em = (extra = {}) => ({ hex: '738abc', flight: 'ELY001', t: 'B789', squawk: '7700', lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300, ...extra });
+
+test('חירום: אילו קודים נחשבים, ורק עד 100 ק"מ מנתב"ג', () => {
+  assert.equal(emergencyOf({ squawk: '7700' }).meaning, 'מצב חירום');
+  assert.equal(emergencyOf({ squawk: '7600' }).meaning, 'תקלת קשר רדיו');
+  assert.equal(emergencyOf({ squawk: '7500' }).code, '7500');
+  assert.equal(emergencyOf({ emergency: 'minfuel' }).meaning, 'מחסור בדלק');
+  assert.equal(emergencyOf({ squawk: '1173', emergency: 'none' }), null);
+  assert.equal(emergencyOf({}), null);
+  assert.equal(emergencies([em(), em({ hex: 'far', lat: 34.5, lon: 35.5 }), em({ hex: 'ok', squawk: '2000' })]).length, 1);
+});
+
+test('חירום: מתקשרים רק אחרי 2 דגימות רצופות, ולא שוב על אותו מטוס 3 שעות', () => {
+  let s = emergencyStep({}, emergencies([em()]), T0);
+  assert.equal(s.toCall.length, 0, 'דגימה ראשונה – אולי קוד שהבהב בטעות');
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 60e3);
+  assert.equal(s.toCall.length, 1, 'שתי דגימות רצופות → שיחה');
+  s.seen['738abc'].calledAt = T0 + 60e3;                                   // ה-handler מסמן שהתקשר
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 120e3);
+  assert.equal(s.toCall.length, 0, 'כבר התקשרו על המטוס הזה');
+  s = emergencyStep(s.seen, [], T0 + 30 * 60e3);                            // יצא מחירום
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 31 * 60e3);
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 32 * 60e3);
+  assert.equal(s.toCall.length, 0, 'חזר לחירום תוך 3 שעות – לא מתקשרים שוב');
+  const later = T0 + 60e3 + RECALL_MS + 60e3;
+  s = emergencyStep(s.seen, emergencies([em()]), later);
+  s = emergencyStep(s.seen, emergencies([em()]), later + 60e3);
+  assert.equal(s.toCall.length, 1, 'אחרי 3 שעות – שוב');
+});
+
+test('חירום: דגימה שהבהבה ונעלמה לא נספרת כרצופה', () => {
+  let s = emergencyStep({}, emergencies([em()]), T0);
+  s = emergencyStep(s.seen, [], T0 + 60e3);
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 120e3);
+  assert.equal(s.toCall.length, 0);
+  s = emergencyStep(s.seen, emergencies([em()]), T0 + 10 * 60e3);           // פער של 8 דקות – לא רצוף
+  assert.equal(s.toCall.length, 0);
+});
+
+test('חירום: טקסט ההקראה – מי, איפה, מה הקוד, והסתייגות; בלי תווים אסורים', () => {
+  const t = sayClean(emergencyText(emergencies([em()])));
+  assert.match(t, /^התרעת חירום מקו מידע הטיסות/);
+  assert.match(t, /משדר קוד 7 7 0 0 מצב חירום/);
+  assert.match(t, /אל על טיסה 1 בואינג 787 במרחק \d+ קילומטר \S+.* לנמל התעופה בגובה 2700 מטר/);
+  assert.match(t, /נתוני רדאר פתוחים ועלול להיות שגוי/);
+  assert.match(t, /אינה התרעה של פיקוד העורף/);
+  assert.doesNotMatch(t, /[."'&|()~/-]/);
+});
 
 test('watcher: detect.cjs זהה ל-detect.js (אותה לוגיקה בדף ובשרת)', () => {
   const a = readFileSync(new URL('../detect.js', import.meta.url), 'utf8');
