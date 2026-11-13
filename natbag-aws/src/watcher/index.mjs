@@ -7,6 +7,7 @@
 // פרטי ימות המשיח נקראים מ-SSM: /natbag/yemot/username, /natbag/yemot/password, /natbag/yemot/phone
 
 import { createRequire } from "node:module";
+import { emergencies, emergencyStep, emergencyText } from "./emergency.mjs";
 const D = createRequire(import.meta.url)("./detect.cjs");
 
 export const TLV = { lat: 32.0055, lon: 34.8854 };
@@ -14,7 +15,7 @@ const RADIUS_KM = 80, DEV_THRESH = 18, FINAL_KM = 25, FINAL_ALT = 1800;
 const TRAIL_MS = 10 * 60e3, HISTORY_MS = 60 * 60e3, APPROACH_MS = 10 * 60e3;
 export const CALL_GAP_MS = 30 * 60e3;
 
-export const emptyState = () => ({ history: [], trails: {}, approachSeen: {}, lastDist: {}, planeHist: {}, lastLevel: "normal", lastCallAt: 0 });
+export const emptyState = () => ({ history: [], trails: {}, approachSeen: {}, lastDist: {}, planeHist: {}, emergency: {}, lastLevel: "normal", lastCallAt: 0 });
 
 /**
  * צעד אחד: רשימת ADS-B → מצב חדש + סטטוס המדד. פונקציה טהורה (בלי רשת), כדי שאפשר לבדוק אותה.
@@ -163,17 +164,45 @@ export const handler = async (event = {}) => {
     log({ level: "info", testCall: true, ...res });
     return { ok: true, ...res };
   }
+  // בדיקה ידנית של התרעת חירום (מטוס מדומה): --payload '{"testEmergency":true}'
+  if (event.testEmergency) {
+    const creds = await loadYemot();
+    if (!creds) return { ok: false, error: "חסרים פרמטרים של ימות המשיח ב-SSM (/natbag/yemot/*)" };
+    const fake = { hex: "test", flight: "ELY001", t: "B789", squawk: "7700", lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300 };
+    const text = sayClean("שיחת בדיקה , " + emergencyText(emergencies([fake])));
+    const res = await yemotCall(creds, text);
+    log({ level: "info", testEmergency: true, text, ...res });
+    return { ok: true, text, ...res };
+  }
 
   const now = Date.now();
-  const r = await fetch(`${String(process.env.PROXY_URL).replace(/\/?$/, "/")}aircraft?lat=${TLV.lat}&lon=${TLV.lon}&dist=43`,
+  // 54 מייל ימי (~100 ק"מ) – כדי לראות גם מטוס בחירום שעוד רחוק מהשדה. המדד עצמו מסנן ל-80 ק"מ
+  const r = await fetch(`${String(process.env.PROXY_URL).replace(/\/?$/, "/")}aircraft?lat=${TLV.lat}&lon=${TLV.lon}&dist=54`,
     { headers: { "User-Agent": "natbag-watcher/1.0" }, signal: AbortSignal.timeout(9000) });
   if (!r.ok) throw new Error(`aircraft HTTP ${r.status}`);
   const { ac } = await r.json();
 
   const prev = (await loadJson(process.env.TABLE, "state")) || emptyState();
   const { state, status, planes } = step(prev, ac, now);
+
+  // מטוס בחירום (7700/7600/7500) – שיחה מיידית, בלי לחכות למדד. קודם לשיחת החריגה
+  const emerg = emergencies(ac);
+  const es = emergencyStep(prev.emergency, emerg, now);
+  state.emergency = es.seen;
+  let emergencyCall = null;
+  if (es.toCall.length) {
+    try {
+      const creds = await loadYemot();
+      if (creds) {
+        emergencyCall = await yemotCall(creds, sayClean(emergencyText(es.toCall)));
+        for (const e of es.toCall) state.emergency[e.id].calledAt = now;
+        state.lastCallAt = now;            // שיחת החריגה (שכנראה נובעת מאותו מטוס) תחכה חצי שעה
+      } else emergencyCall = { skipped: "אין פרטי ימות המשיח ב-SSM" };
+    } catch (e) { emergencyCall = { error: e.message }; }
+  }
+
   let call = null;
-  if (shouldCall(prev.lastLevel, status, prev.lastCallAt, now)) {
+  if (!emergencyCall?.campaignId && shouldCall(prev.lastLevel, status, state.lastCallAt ?? prev.lastCallAt, now)) {
     try {
       const creds = await loadYemot();
       if (creds) { call = await yemotCall(creds, callText(status)); state.lastCallAt = now; }
@@ -189,7 +218,11 @@ export const handler = async (event = {}) => {
   await saveJson(process.env.TABLE, `stats#${date}`, day);
 
   // מדד למעקב בלוח הבקרה: ציון המדד (0 = שגרה, 2+ = חריגה, 4+ = משמעותית)
-  log({ _aws: { Timestamp: now, CloudWatchMetrics: [{ Namespace: "Natbag", Dimensions: [[]], Metrics: [{ Name: "AirspaceScore", Unit: "Count" }] }] },
-        AirspaceScore: status.score, level: status.level, reasons: status.reasons, baselineReady: status.baselineReady, call });
-  return { level: status.level, score: status.score, call };
+  // EmergencyAircraft: כמה מטוסים משדרים קוד חירום ברגע זה (לגרף ולאזעקה ב-CloudWatch)
+  log({ _aws: { Timestamp: now, CloudWatchMetrics: [{ Namespace: "Natbag", Dimensions: [[]],
+          Metrics: [{ Name: "AirspaceScore", Unit: "Count" }, { Name: "EmergencyAircraft", Unit: "Count" }] }] },
+        AirspaceScore: status.score, EmergencyAircraft: emerg.length, level: status.level, reasons: status.reasons,
+        baselineReady: status.baselineReady, call,
+        emergency: emerg.map(e => ({ id: e.id, cs: String(e.a.flight || "").trim(), code: e.code })), emergencyCall });
+  return { level: status.level, score: status.score, call, emergencyCall, emergencies: emerg.length };
 };
