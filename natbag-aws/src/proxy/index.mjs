@@ -28,7 +28,8 @@ const SSM_PREFIX = process.env.SSM_PREFIX || "/natbag/opensky";
 const ADSB_SOURCES = [
   { name: "adsb.lol",       url: (lat, lon, nm) => `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${nm}` },
   { name: "airplanes.live", url: (lat, lon, nm) => `https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}` },
-  { name: "adsb.fi",        url: (lat, lon, nm) => `https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${nm}` },
+  // adsb.fi: נקודת הקצה v2 לפי מיקום הוצאה משימוש ומחזירה פורמט אחר; v3 מחזירה ac כמו השאר
+  { name: "adsb.fi",        url: (lat, lon, nm) => `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}` },
 ];
 
 // מטמון בזיכרון: נשמר כל עוד אותו מופע של Lambda "חם"
@@ -99,21 +100,30 @@ const upstreamFailed = (route, details) => {
   console.error(JSON.stringify({ level: "error", route, details }));
 };
 
+// כל המקורות נשאלים במקביל, והראשון שעונה תקין מנצח.
+// קודם עברו עליהם אחד אחרי השני, וכשהראשון נתקע עד ה-timeout כל בקשה חיכתה 7 שניות.
 async function getAircraft(area) {
   const errors = [];
-  for (const src of ADSB_SOURCES) {
+  const attempt = async (src) => {
     try {
       const data = await fetchJson(src.url(area.lat, area.lon, area.nm));
+      if (data && !Array.isArray(data.ac) && Array.isArray(data.aircraft)) data.ac = data.aircraft;
       if (!data || !Array.isArray(data.ac)) throw new Error("תשובה בלי ac");
       data._source = src.name;
-      emitMetric("SourceUsed", "Source", src.name);
-      return { ok: true, data };
+      return data;
     } catch (e) {
       errors.push(`${src.name}: ${e.message}`);
+      throw e;
     }
+  };
+  try {
+    const data = await Promise.any(ADSB_SOURCES.map(attempt));
+    emitMetric("SourceUsed", "Source", data._source);
+    return { ok: true, data };
+  } catch {
+    upstreamFailed("aircraft", errors);
+    return { ok: false, data: { error: "כל מקורות ADS-B נכשלו", details: errors } };
   }
-  upstreamFailed("aircraft", errors);
-  return { ok: false, data: { error: "כל מקורות ADS-B נכשלו", details: errors } };
 }
 
 // ---- OpenSky: פרטי ההתחברות נשמרים ב-SSM Parameter Store (SecureString) ----
