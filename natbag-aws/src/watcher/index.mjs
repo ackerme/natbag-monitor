@@ -180,6 +180,20 @@ async function sendAlert({ subject, body, speech }, env = process.env) {
   return out;
 }
 
+/** המטוסים משרת הביניים: { ok:true, list } או { ok:false, error } – בלי לזרוק */
+export async function fetchAircraft(proxyUrl, fetchImpl = fetch) {
+  try {
+    const r = await fetchImpl(`${String(proxyUrl).replace(/\/?$/, "/")}aircraft?lat=${TLV.lat}&lon=${TLV.lon}&dist=54`,
+      { headers: { "User-Agent": "natbag-watcher/1.0" }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return { ok: false, error: `aircraft HTTP ${r.status}` };
+    const j = await r.json();
+    if (!Array.isArray(j?.ac)) return { ok: false, error: "aircraft: אין רשימת מטוסים בתשובה" };
+    return { ok: true, list: j.ac };
+  } catch (e) {
+    return { ok: false, error: `aircraft: ${e.name === "TimeoutError" ? "timeout" : e.message}` };
+  }
+}
+
 const FAKE_EMERGENCY = { hex: "test", flight: "ELY001", r: "4X-EDA", t: "B789", squawk: "7700",
   lat: 32.2, lon: 34.6, alt_baro: 9000, baro_rate: -1200, track: 120, gs: 300 };
 
@@ -206,16 +220,21 @@ export const handler = async (event = {}) => {
 
   const now = Date.now();
   // 54 מייל ימי (~100 ק"מ) – כדי לראות גם מטוס בחירום שעוד רחוק מהשדה. המדד עצמו מסנן ל-80 ק"מ
-  const r = await fetch(`${String(process.env.PROXY_URL).replace(/\/?$/, "/")}aircraft?lat=${TLV.lat}&lon=${TLV.lon}&dist=54`,
-    { headers: { "User-Agent": "natbag-watcher/1.0" }, signal: AbortSignal.timeout(9000) });
-  if (!r.ok) throw new Error(`aircraft HTTP ${r.status}`);
-  const { ac } = await r.json();
+  // מקור הנתונים לא ענה (כל מקורות ה-ADS-B למטה, 502, timeout) – זו לא תקלה בפונקציה: מדלגים על הדקה הזו.
+  // לא זורקים שגיאה, כי אז כל דקה בלי נתונים נספרת כשגיאת Lambda ומקפיצה התרעה. על מקור שנפל יש התרעה נפרדת
+  // (natbag-adsb-sources-down). המצב לא משתנה, והמדד היציב (stableLevel) כבר מתמודד עם דקות חסרות.
+  const ac = await fetchAircraft(process.env.PROXY_URL);
+  if (!ac.ok) {
+    log({ _aws: { Timestamp: now, CloudWatchMetrics: [{ Namespace: "Natbag", Dimensions: [[]], Metrics: [{ Name: "WatcherNoData", Unit: "Count" }] }] },
+          WatcherNoData: 1, level: "warn", skipped: "no-data", error: ac.error });
+    return { skipped: "no-data", error: ac.error };
+  }
 
   const prev = (await loadJson(process.env.TABLE, "state")) || emptyState();
-  const { state, status, planes } = step(prev, ac, now);
+  const { state, status, planes } = step(prev, ac.list, now);
 
   // מטוס בחירום (7700/7600/7500) – התרעה מיידית, בלי לחכות למדד. קודמת להתרעת החריגה
-  const emerg = emergencies(ac);
+  const emerg = emergencies(ac.list);
   const es = emergencyStep(prev.emergency, emerg, now);
   state.emergency = es.seen;
   let emergencyAlert = null;

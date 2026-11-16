@@ -794,6 +794,9 @@ Resources:
       Architectures: [arm64]
       MemorySize: 128
       Timeout: 30
+      # בלי ניסיון חוזר: ההרצה הבאה מגיעה בעוד דקה ממילא. ניסיון חוזר (ברירת המחדל: 2) רק משכפל כל שגיאה פי 3
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       LoggingConfig:
         LogGroup: !Ref WatcherLogGroup
       Environment:
