@@ -221,3 +221,31 @@ test('ירידה במספר המטוסים: דגימה בודדת עם נתונ�
   const real = [...base, { t: NOW - 2 * 60e3, airborne: 2 }, { t: NOW - 60e3, airborne: 1 }, { t: NOW, airborne: 2 }];
   assert.ok(DD.airspaceStatus(real, NOW).reasons.some(r => r.includes('ירידה חדה במספר')), '3 דקות רצופות – ירידה אמיתית');
 });
+
+// ───────── מקור הנתונים לא עונה → מדלגים בלי לזרוק (לא נספר כשגיאת Lambda) ─────────
+import { fetchAircraft, handler as watcherHandler } from '../natbag-aws/src/watcher/index.mjs';
+
+test('fetchAircraft: 502 / timeout / תשובה שבורה → ok:false בלי לזרוק', async () => {
+  const res = (ok, status, body) => async () => ({ ok, status, json: async () => body });
+  assert.deepEqual(await fetchAircraft('https://p/', res(false, 502)), { ok: false, error: 'aircraft HTTP 502' });
+  const to = await fetchAircraft('https://p/', async () => { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; });
+  assert.deepEqual(to, { ok: false, error: 'aircraft: timeout' });
+  assert.equal((await fetchAircraft('https://p/', res(true, 200, { error: 'x' }))).ok, false);
+  const good = await fetchAircraft('https://p', res(true, 200, { ac: [{ hex: 'a' }] }));
+  assert.deepEqual(good, { ok: true, list: [{ hex: 'a' }] });
+});
+
+test('handler: כשמקור ה-ADS-B מחזיר 502 – מחזיר skipped ולא נוגע במצב', async () => {
+  const realFetch = globalThis.fetch, realWrite = process.stdout.write;
+  const calls = [], out = [];
+  globalThis.fetch = async url => { calls.push(String(url)); return { ok: false, status: 502, json: async () => ({}) }; };
+  process.stdout.write = s => { out.push(String(s)); return true; };
+  process.env.PROXY_URL = 'https://proxy.example/';
+  try {
+    const r = await watcherHandler({});
+    assert.deepEqual(r, { skipped: 'no-data', error: 'aircraft HTTP 502' });
+    assert.equal(calls.length, 1);                              // רק שרת הביניים – בלי DynamoDB
+    const line = JSON.parse(out.find(l => l.includes('WatcherNoData')));
+    assert.equal(line.level, 'warn');
+  } finally { globalThis.fetch = realFetch; process.stdout.write = realWrite; }
+});

@@ -168,6 +168,8 @@ read -rsp "Phone to call: " V && aws ssm put-parameter --name /natbag/yemot/phon
 
 **מעקב:** הלוגים ב-`/aws/lambda/natbag-watcher`, והמדדים `AirspaceScore` ו-`EmergencyAircraft` ב-CloudWatch (Namespace: Natbag).
 
+**כשמקור הנתונים לא עונה** (כל מקורות ה-ADS-B למטה): ה-watcher מדלג על הדקה, רושם `skipped: no-data` ומדד `WatcherNoData`, ולא נחשב כשגיאת Lambda. על מקור שנפל מתריעה `natbag-adsb-sources-down`; ההתרעה `natbag-watcher-errors` נשארת לתקלות אמיתיות בקוד. אין ניסיון חוזר להרצה שנכשלה – הבאה מגיעה בעוד דקה.
+
 ## פריסה אוטומטית מ-GitHub (CI/CD)
 
 מגדירים פעם אחת, ומאז כל push ל-`main` מריץ בדיקות ופורס לבד.
