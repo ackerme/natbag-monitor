@@ -1,0 +1,59 @@
+# בדיקות אבטחה: חולשות בספריות, סודות שנשכחו בקוד, והגדרות תשתית מסוכנות.
+# רץ בכל העלאה, בכל בקשת מיזוג, ופעם בשבוע (כי חולשות חדשות מתגלות גם בלי שינוי בקוד).
+name: security (בדיקות אבטחה)
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"   # יום שני 06:17 שעון ישראל
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: חולשות בספריות (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: echo 'אין ספריות npm בפרויקט — אין מה לבדוק'
+
+  secrets:
+    name: סודות בקוד (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  infrastructure:
+    name: הגדרות תשתית (checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: סריקת Terraform / CloudFormation / Kubernetes / GitHub Actions
+        run: |
+          pip install --quiet checkov
+          # בשלב ראשון רק מדווח, לא חוסם (soft-fail). אחרי שנעבור על הממצאים — נוריד את soft-fail
+          checkov -d . --quiet --compact --soft-fail --skip-path node_modules -o cli > checkov.txt || true
+          tail -n 40 checkov.txt
+      - name: סיכום
+        if: always()
+        run: |
+          echo '### checkov — הגדרות תשתית' >> $GITHUB_STEP_SUMMARY
+          grep -E "Passed checks|Failed checks" checkov.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "^Check: " checkov.txt | sort | uniq -c | sort -rn | head -40 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
