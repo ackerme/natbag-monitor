@@ -4,6 +4,7 @@ name: security (בדיקות אבטחה)
 
 on:
   push:
+    branches: [main]      # בענפים אחרים הבדיקה רצה דרך בקשת המיזוג (בלי כפילות)
   pull_request:
   schedule:
     - cron: "17 4 * * 1"   # יום שני 06:17 שעון ישראל
@@ -11,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read     # gitleaks קורא את רשימת ה-commits של בקשת המיזוג
 
 jobs:
   dependencies:
