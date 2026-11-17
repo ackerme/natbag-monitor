@@ -36,23 +36,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   infrastructure:
-    name: הגדרות תשתית (trivy)
+    name: הגדרות תשתית (checkov)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: סריקת Terraform / CloudFormation / Kubernetes
-        uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/setup-python@v5
         with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          format: table
-          output: trivy.txt
-          exit-code: "0"   # בשלב ראשון רק מדווח, לא חוסם. אחרי שנעבור על הממצאים — נהפוך ל-1
+          python-version: "3.12"
+      - name: סריקת Terraform / CloudFormation / Kubernetes / GitHub Actions
+        run: |
+          pip install --quiet checkov
+          # בשלב ראשון רק מדווח, לא חוסם (soft-fail). אחרי שנעבור על הממצאים — נוריד את soft-fail
+          checkov -d . --quiet --compact --soft-fail --skip-path node_modules -o cli > checkov.txt || true
+          tail -n 40 checkov.txt
       - name: סיכום
         if: always()
         run: |
-          echo '### trivy — HIGH/CRITICAL' >> $GITHUB_STEP_SUMMARY
+          echo '### checkov — הגדרות תשתית' >> $GITHUB_STEP_SUMMARY
+          grep -E "Passed checks|Failed checks" checkov.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
-          head -c 60000 trivy.txt >> $GITHUB_STEP_SUMMARY || true
+          grep -E "^Check: " checkov.txt | sort | uniq -c | sort -rn | head -40 >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
