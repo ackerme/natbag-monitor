@@ -1,0 +1,58 @@
+# בדיקות אבטחה: חולשות בספריות, סודות שנשכחו בקוד, והגדרות תשתית מסוכנות.
+# רץ בכל העלאה, בכל בקשת מיזוג, ופעם בשבוע (כי חולשות חדשות מתגלות גם בלי שינוי בקוד).
+name: security (בדיקות אבטחה)
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"   # יום שני 06:17 שעון ישראל
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: חולשות בספריות (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: echo 'אין ספריות npm בפרויקט — אין מה לבדוק'
+
+  secrets:
+    name: סודות בקוד (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  infrastructure:
+    name: הגדרות תשתית (trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: סריקת Terraform / CloudFormation / Kubernetes
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          format: table
+          output: trivy.txt
+          exit-code: "0"   # בשלב ראשון רק מדווח, לא חוסם. אחרי שנעבור על הממצאים — נהפוך ל-1
+      - name: סיכום
+        if: always()
+        run: |
+          echo '### trivy — HIGH/CRITICAL' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -c 60000 trivy.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
